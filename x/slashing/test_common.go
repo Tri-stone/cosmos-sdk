@@ -68,7 +68,7 @@ func createTestInput(t *testing.T, defaults Params) (sdk.Context, bank.Keeper, s
 	require.Nil(t, err)
 	ctx := sdk.NewContext(ms, abci.Header{Time: time.Unix(0, 0)}, false, log.NewTMLogger(os.Stdout))
 	cdc := createTestCodec()
-	paramsKeeper := params.NewKeeper(cdc, keyParams, tkeyParams)
+	paramsKeeper := params.NewKeeper(cdc, keyParams, tkeyParams, params.DefaultCodespace)
 	accountKeeper := auth.NewAccountKeeper(cdc, keyAcc, paramsKeeper.Subspace(auth.DefaultParamspace), auth.ProtoBaseAccount)
 
 	ck := bank.NewBaseKeeper(accountKeeper, paramsKeeper.Subspace(bank.DefaultParamspace), bank.DefaultCodespace)
@@ -81,7 +81,7 @@ func createTestInput(t *testing.T, defaults Params) (sdk.Context, bank.Keeper, s
 	require.Nil(t, err)
 
 	for _, addr := range addrs {
-		_, _, err = ck.AddCoins(ctx, sdk.AccAddress(addr), sdk.Coins{
+		_, err = ck.AddCoins(ctx, sdk.AccAddress(addr), sdk.Coins{
 			{sk.GetParams(ctx).BondDenom, initCoins},
 		})
 	}

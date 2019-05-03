@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -9,13 +10,11 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/rest"
 	"github.com/cosmos/cosmos-sdk/x/staking"
-	"github.com/cosmos/cosmos-sdk/x/staking/tags"
 
 	"github.com/gorilla/mux"
 )
 
 func registerQueryRoutes(cliCtx context.CLIContext, r *mux.Router, cdc *codec.Codec) {
-
 	// Get all delegations from a delegator
 	r.HandleFunc(
 		"/staking/delegators/{delegatorAddr}/delegations",
@@ -125,14 +124,6 @@ func delegatorTxsHandlerFn(cliCtx context.CLIContext, cdc *codec.Codec) http.Han
 			return
 		}
 
-		node, err := cliCtx.GetNode()
-		if err != nil {
-			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		// Get values from query
-
 		typesQuery := r.URL.Query().Get("type")
 		trimmedQuery := strings.TrimSpace(typesQuery)
 		if len(trimmedQuery) != 0 {
@@ -151,25 +142,21 @@ func delegatorTxsHandlerFn(cliCtx context.CLIContext, cdc *codec.Codec) http.Han
 			actions = append(actions, staking.MsgDelegate{}.Type())
 		case isUnbondTx:
 			actions = append(actions, staking.MsgUndelegate{}.Type())
-			actions = append(actions, tags.ActionCompleteUnbonding)
 		case isRedTx:
 			actions = append(actions, staking.MsgBeginRedelegate{}.Type())
-			actions = append(actions, tags.ActionCompleteRedelegation)
 		case noQuery:
 			actions = append(actions, staking.MsgDelegate{}.Type())
 			actions = append(actions, staking.MsgUndelegate{}.Type())
-			actions = append(actions, tags.ActionCompleteUnbonding)
 			actions = append(actions, staking.MsgBeginRedelegate{}.Type())
-			actions = append(actions, tags.ActionCompleteRedelegation)
 		default:
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
 		for _, action := range actions {
-			foundTxs, errQuery := queryTxs(node, cliCtx, cdc, action, delegatorAddr)
+			foundTxs, errQuery := queryTxs(cliCtx, cdc, action, delegatorAddr)
 			if errQuery != nil {
-				rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
+				rest.WriteErrorResponse(w, http.StatusInternalServerError, errQuery.Error())
 			}
 			txs = append(txs, foundTxs...)
 		}
@@ -257,7 +244,31 @@ func delegatorValidatorHandlerFn(cliCtx context.CLIContext, cdc *codec.Codec) ht
 // HTTP request handler to query list of validators
 func validatorsHandlerFn(cliCtx context.CLIContext, cdc *codec.Codec) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		res, err := cliCtx.QueryWithData("custom/staking/validators", nil)
+		_, page, limit, err := rest.ParseHTTPArgs(r)
+		if err != nil {
+			rest.WriteErrorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		// override default limit if it wasn't provided
+		if l := r.FormValue("limit"); l == "" {
+			limit = 0
+		}
+
+		status := r.FormValue("status")
+		if status == "" {
+			status = sdk.BondStatusBonded
+		}
+
+		params := staking.NewQueryValidatorsParams(page, limit, status)
+		bz, err := cdc.MarshalJSON(params)
+		if err != nil {
+			rest.WriteErrorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		route := fmt.Sprintf("custom/%s/%s", staking.QuerierRoute, staking.QueryValidators)
+		res, err := cliCtx.QueryWithData(route, bz)
 		if err != nil {
 			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
 			return

@@ -46,7 +46,7 @@ func (h Hooks) AfterValidatorRemoved(ctx sdk.Context, _ sdk.ConsAddress, valAddr
 			accAddr := sdk.AccAddress(valAddr)
 			withdrawAddr := h.k.GetDelegatorWithdrawAddr(ctx, accAddr)
 
-			if _, _, err := h.k.bankKeeper.AddCoins(ctx, withdrawAddr, coins); err != nil {
+			if _, err := h.k.bankKeeper.AddCoins(ctx, withdrawAddr, coins); err != nil {
 				panic(err)
 			}
 		}
@@ -83,7 +83,7 @@ func (h Hooks) BeforeDelegationSharesModified(ctx sdk.Context, delAddr sdk.AccAd
 	del := h.k.stakingKeeper.Delegation(ctx, delAddr, valAddr)
 
 	// withdraw delegation rewards (which also increments period)
-	if err := h.k.withdrawDelegationRewards(ctx, val, del); err != nil {
+	if _, err := h.k.withdrawDelegationRewards(ctx, val, del); err != nil {
 		panic(err)
 	}
 }

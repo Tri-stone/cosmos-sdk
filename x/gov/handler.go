@@ -13,30 +13,36 @@ func NewHandler(keeper Keeper) sdk.Handler {
 		switch msg := msg.(type) {
 		case MsgDeposit:
 			return handleMsgDeposit(ctx, keeper, msg)
+
 		case MsgSubmitProposal:
 			return handleMsgSubmitProposal(ctx, keeper, msg)
+
 		case MsgVote:
 			return handleMsgVote(ctx, keeper, msg)
+
 		default:
-			errMsg := fmt.Sprintf("Unrecognized gov msg type: %T", msg)
+			errMsg := fmt.Sprintf("unrecognized gov message type: %T", msg)
 			return sdk.ErrUnknownRequest(errMsg).Result()
 		}
 	}
 }
 
 func handleMsgSubmitProposal(ctx sdk.Context, keeper Keeper, msg MsgSubmitProposal) sdk.Result {
-	proposal := keeper.NewTextProposal(ctx, msg.Title, msg.Description, msg.ProposalType)
-	proposalID := proposal.GetProposalID()
-	proposalIDStr := fmt.Sprintf("%d", proposalID)
-
-	err, votingStarted := keeper.AddDeposit(ctx, proposalID, msg.Proposer, msg.InitialDeposit)
+	proposal, err := keeper.SubmitProposal(ctx, msg.Content)
 	if err != nil {
 		return err.Result()
 	}
 
+	err, votingStarted := keeper.AddDeposit(ctx, proposal.ProposalID, msg.Proposer, msg.InitialDeposit)
+	if err != nil {
+		return err.Result()
+	}
+
+	proposalIDStr := fmt.Sprintf("%d", proposal.ProposalID)
 	resTags := sdk.NewTags(
-		tags.Proposer, []byte(msg.Proposer.String()),
 		tags.ProposalID, proposalIDStr,
+		tags.Category, tags.TxCategory,
+		tags.Sender, msg.Proposer.String(),
 	)
 
 	if votingStarted {
@@ -44,7 +50,7 @@ func handleMsgSubmitProposal(ctx sdk.Context, keeper Keeper, msg MsgSubmitPropos
 	}
 
 	return sdk.Result{
-		Data: keeper.cdc.MustMarshalBinaryLengthPrefixed(proposalID),
+		Data: keeper.cdc.MustMarshalBinaryLengthPrefixed(proposal.ProposalID),
 		Tags: resTags,
 	}
 }
@@ -56,9 +62,11 @@ func handleMsgDeposit(ctx sdk.Context, keeper Keeper, msg MsgDeposit) sdk.Result
 	}
 
 	proposalIDStr := fmt.Sprintf("%d", msg.ProposalID)
+
 	resTags := sdk.NewTags(
-		tags.Depositor, []byte(msg.Depositor.String()),
 		tags.ProposalID, proposalIDStr,
+		tags.Category, tags.TxCategory,
+		tags.Sender, msg.Depositor.String(),
 	)
 
 	if votingStarted {
@@ -76,10 +84,13 @@ func handleMsgVote(ctx sdk.Context, keeper Keeper, msg MsgVote) sdk.Result {
 		return err.Result()
 	}
 
+	proposalIDStr := fmt.Sprintf("%d", msg.ProposalID)
+
 	return sdk.Result{
 		Tags: sdk.NewTags(
-			tags.Voter, msg.Voter.String(),
-			tags.ProposalID, fmt.Sprintf("%d", msg.ProposalID),
+			tags.ProposalID, proposalIDStr,
+			tags.Category, tags.TxCategory,
+			tags.Sender, msg.Voter.String(),
 		),
 	}
 }

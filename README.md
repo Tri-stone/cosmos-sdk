@@ -18,11 +18,11 @@ It is being used to build `Gaia`, the first implementation of the Cosmos Hub.
 **WARNING**: The SDK has mostly stabilized, but we are still making some
 breaking changes.
 
-**Note**: Requires [Go 1.11.5+](https://golang.org/dl/)
+**Note**: Requires [Go 1.12.4+](https://golang.org/dl/)
 
 ## Cosmos Hub Mainnet
 
-To run a full-node for the mainnet of the Cosmos Hub, first [install `gaia`](./docs/gaia/installation.md), then follow [the guide](./docs/gaia/join-mainnet.md).
+To run a full-node for the mainnet of the Cosmos Hub, first [install `gaia`](./docs/cosmos-hub/installation.md), then follow [the guide](./docs/cosmos-hub/join-mainnet.md).
 
 For status updates and genesis file, see the
 [launch repo](https://github.com/cosmos/launch).

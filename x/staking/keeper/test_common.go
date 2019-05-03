@@ -107,7 +107,7 @@ func CreateTestInput(t *testing.T, isCheckTx bool, initPower int64) (sdk.Context
 	)
 	cdc := MakeTestCodec()
 
-	pk := params.NewKeeper(cdc, keyParams, tkeyParams)
+	pk := params.NewKeeper(cdc, keyParams, tkeyParams, params.DefaultCodespace)
 
 	accountKeeper := auth.NewAccountKeeper(
 		cdc,    // amino codec
@@ -131,7 +131,7 @@ func CreateTestInput(t *testing.T, isCheckTx bool, initPower int64) (sdk.Context
 		pool := keeper.GetPool(ctx)
 		err := error(nil)
 		if !initCoins.IsZero() {
-			_, _, err = ck.AddCoins(ctx, addr, sdk.Coins{
+			_, err = ck.AddCoins(ctx, addr, sdk.Coins{
 				{keeper.BondDenom(ctx), initCoins},
 			})
 		}

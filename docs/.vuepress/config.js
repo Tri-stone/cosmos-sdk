@@ -29,26 +29,27 @@ module.exports = {
         collapsable: true,
         children: [
           "/intro/",
-          "/intro/sdk-app-architecture",
+          "/intro/sdk-design",
           "/intro/ocap"
         ]
       },
       {
-        title: "Gaia",
+        title: "Cosmos Hub",
         collapsable: true,
         children: [
-          "/gaia/what-is-gaia",
-          "/gaia/installation",
-          "/gaia/join-mainnet",
-          "/gaia/validators/validator-setup",
-          "/gaia/validators/overview",
-          "/gaia/validators/security",
-          "/gaia/validators/validator-faq",
-          "/gaia/delegator-guide-cli",
-          "/gaia/ledger",
-          "/gaia/gaiacli",
-          "/gaia/join-testnet",
-          "/gaia/deploy-testnet"
+          "/cosmos-hub/what-is-gaia",
+          "/cosmos-hub/installation",
+          "/cosmos-hub/join-mainnet",
+          "/cosmos-hub/validators/validator-setup",
+          "/cosmos-hub/validators/overview",
+          "/cosmos-hub/validators/security",
+          "/cosmos-hub/validators/validator-faq",
+          "/cosmos-hub/delegator-guide-cli",
+          "/cosmos-hub/genesis",
+          "/cosmos-hub/ledger",
+          "/cosmos-hub/gaiacli",
+          "/cosmos-hub/join-testnet",
+          "/cosmos-hub/deploy-testnet"
         ]
       },
       {

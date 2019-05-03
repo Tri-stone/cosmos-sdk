@@ -4,6 +4,17 @@ import (
 	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/x/params"
+)
+
+// Parameter store keys
+var (
+	KeyMintDenom           = []byte("MintDenom")
+	KeyInflationRateChange = []byte("InflationRateChange")
+	KeyInflationMax        = []byte("InflationMax")
+	KeyInflationMin        = []byte("InflationMin")
+	KeyGoalBonded          = []byte("GoalBonded")
+	KeyBlocksPerYear       = []byte("BlocksPerYear")
 )
 
 // mint parameters
@@ -14,6 +25,11 @@ type Params struct {
 	InflationMin        sdk.Dec `json:"inflation_min"`         // minimum inflation rate
 	GoalBonded          sdk.Dec `json:"goal_bonded"`           // goal of percent bonded atoms
 	BlocksPerYear       uint64  `json:"blocks_per_year"`       // expected blocks per year
+}
+
+// ParamTable for minting module.
+func ParamKeyTable() params.KeyTable {
+	return params.NewKeyTable().RegisterParamSet(&Params{})
 }
 
 func NewParams(mintDenom string, inflationRateChange, inflationMax,
@@ -55,4 +71,30 @@ func validateParams(params Params) error {
 		return fmt.Errorf("mint parameter MintDenom can't be an empty string")
 	}
 	return nil
+}
+
+func (p Params) String() string {
+	return fmt.Sprintf(`Minting Params:
+  Mint Denom:             %s
+  Inflation Rate Change:  %s
+  Inflation Max:          %s
+  Inflation Min:          %s
+  Goal Bonded:            %s
+  Blocks Per Year:        %d
+`,
+		p.MintDenom, p.InflationRateChange, p.InflationMax,
+		p.InflationMin, p.GoalBonded, p.BlocksPerYear,
+	)
+}
+
+// Implements params.ParamSet
+func (p *Params) ParamSetPairs() params.ParamSetPairs {
+	return params.ParamSetPairs{
+		{KeyMintDenom, &p.MintDenom},
+		{KeyInflationRateChange, &p.InflationRateChange},
+		{KeyInflationMax, &p.InflationMax},
+		{KeyInflationMin, &p.InflationMin},
+		{KeyGoalBonded, &p.GoalBonded},
+		{KeyBlocksPerYear, &p.BlocksPerYear},
+	}
 }

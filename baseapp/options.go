@@ -28,11 +28,24 @@ func SetMinGasPrices(gasPricesStr string) func(*BaseApp) {
 	return func(bap *BaseApp) { bap.setMinGasPrices(gasPrices) }
 }
 
+// SetHaltHeight returns a BaseApp option function that sets the halt height.
+func SetHaltHeight(height uint64) func(*BaseApp) {
+	return func(bap *BaseApp) { bap.setHaltHeight(height) }
+}
+
 func (app *BaseApp) SetName(name string) {
 	if app.sealed {
 		panic("SetName() on sealed BaseApp")
 	}
 	app.name = name
+}
+
+// SetAppVersion sets the application's version string.
+func (app *BaseApp) SetAppVersion(v string) {
+	if app.sealed {
+		panic("SetAppVersion() on sealed BaseApp")
+	}
+	app.appVersion = v
 }
 
 func (app *BaseApp) SetDB(db dbm.DB) {

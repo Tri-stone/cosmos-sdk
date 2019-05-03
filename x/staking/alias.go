@@ -4,7 +4,6 @@ package staking
 import (
 	"github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	"github.com/cosmos/cosmos-sdk/x/staking/querier"
-	"github.com/cosmos/cosmos-sdk/x/staking/tags"
 	"github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
@@ -36,6 +35,7 @@ type (
 	QueryValidatorParams    = querier.QueryValidatorParams
 	QueryBondsParams        = querier.QueryBondsParams
 	QueryRedelegationParams = querier.QueryRedelegationParams
+	QueryValidatorsParams   = querier.QueryValidatorsParams
 )
 
 var (
@@ -68,6 +68,12 @@ var (
 	UnbondingQueueKey            = keeper.UnbondingQueueKey
 	RedelegationQueueKey         = keeper.RedelegationQueueKey
 	ValidatorQueueKey            = keeper.ValidatorQueueKey
+	RegisterInvariants           = keeper.RegisterInvariants
+	AllInvariants                = keeper.AllInvariants
+	SupplyInvariants             = keeper.SupplyInvariants
+	NonNegativePowerInvariant    = keeper.NonNegativePowerInvariant
+	PositiveDelegationInvariant  = keeper.PositiveDelegationInvariant
+	DelegatorSharesInvariant     = keeper.DelegatorSharesInvariant
 
 	DefaultParamspace = keeper.DefaultParamspace
 	KeyUnbondingTime  = types.KeyUnbondingTime
@@ -91,10 +97,11 @@ var (
 	NewMsgUndelegate      = types.NewMsgUndelegate
 	NewMsgBeginRedelegate = types.NewMsgBeginRedelegate
 
-	NewQuerier              = querier.NewQuerier
-	NewQueryDelegatorParams = querier.NewQueryDelegatorParams
-	NewQueryValidatorParams = querier.NewQueryValidatorParams
-	NewQueryBondsParams     = querier.NewQueryBondsParams
+	NewQuerier               = querier.NewQuerier
+	NewQueryDelegatorParams  = querier.NewQueryDelegatorParams
+	NewQueryValidatorParams  = querier.NewQueryValidatorParams
+	NewQueryBondsParams      = querier.NewQueryBondsParams
+	NewQueryValidatorsParams = querier.NewQueryValidatorsParams
 )
 
 const (
@@ -165,16 +172,4 @@ var (
 	ErrMinSelfDelegationInvalid   = types.ErrMinSelfDelegationInvalid
 	ErrMinSelfDelegationDecreased = types.ErrMinSelfDelegationDecreased
 	ErrSelfDelegationBelowMinimum = types.ErrSelfDelegationBelowMinimum
-)
-
-var (
-	ActionCompleteUnbonding    = tags.ActionCompleteUnbonding
-	ActionCompleteRedelegation = tags.ActionCompleteRedelegation
-
-	TagAction       = tags.Action
-	TagSrcValidator = tags.SrcValidator
-	TagDstValidator = tags.DstValidator
-	TagDelegator    = tags.Delegator
-	TagMoniker      = tags.Moniker
-	TagIdentity     = tags.Identity
 )

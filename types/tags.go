@@ -71,6 +71,8 @@ func MakeTag(k string, v string) Tag {
 // common tags
 var (
 	TagAction       = "action"
+	TagCategory     = "category"
+	TagSender       = "sender"
 	TagSrcValidator = "source-validator"
 	TagDstValidator = "destination-validator"
 	TagDelegator    = "delegator"
@@ -94,7 +96,8 @@ func (st StringTags) String() string {
 	for _, t := range st {
 		sb.WriteString(fmt.Sprintf("    - %s\n", t.String()))
 	}
-	return sb.String()
+
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // Conversion function from a []byte tag to a string tag

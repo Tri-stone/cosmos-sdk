@@ -5,6 +5,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/distribution/types"
 	"github.com/cosmos/cosmos-sdk/x/params"
+
+	"github.com/tendermint/tendermint/libs/log"
 )
 
 // keeper of the staking store
@@ -35,6 +37,9 @@ func NewKeeper(cdc *codec.Codec, key sdk.StoreKey, paramSpace params.Subspace, c
 	return keeper
 }
 
+// Logger returns a module-specific logger.
+func (k Keeper) Logger(ctx sdk.Context) log.Logger { return ctx.Logger().With("module", "x/distr") }
+
 // set withdraw address
 func (k Keeper) SetWithdrawAddr(ctx sdk.Context, delegatorAddr sdk.AccAddress, withdrawAddr sdk.AccAddress) sdk.Error {
 	if !k.GetWithdrawAddrEnabled(ctx) {
@@ -47,41 +52,39 @@ func (k Keeper) SetWithdrawAddr(ctx sdk.Context, delegatorAddr sdk.AccAddress, w
 }
 
 // withdraw rewards from a delegation
-func (k Keeper) WithdrawDelegationRewards(ctx sdk.Context, delAddr sdk.AccAddress, valAddr sdk.ValAddress) sdk.Error {
+func (k Keeper) WithdrawDelegationRewards(ctx sdk.Context, delAddr sdk.AccAddress, valAddr sdk.ValAddress) (sdk.Coins, sdk.Error) {
 	val := k.stakingKeeper.Validator(ctx, valAddr)
 	if val == nil {
-		return types.ErrNoValidatorDistInfo(k.codespace)
+		return nil, types.ErrNoValidatorDistInfo(k.codespace)
 	}
 
 	del := k.stakingKeeper.Delegation(ctx, delAddr, valAddr)
 	if del == nil {
-		return types.ErrNoDelegationDistInfo(k.codespace)
+		return nil, types.ErrNoDelegationDistInfo(k.codespace)
 	}
 
 	// withdraw rewards
-	if err := k.withdrawDelegationRewards(ctx, val, del); err != nil {
-		return err
+	rewards, err := k.withdrawDelegationRewards(ctx, val, del)
+	if err != nil {
+		return nil, err
 	}
 
 	// reinitialize the delegation
 	k.initializeDelegation(ctx, valAddr, delAddr)
 
-	return nil
+	return rewards, nil
 }
 
 // withdraw validator commission
-func (k Keeper) WithdrawValidatorCommission(ctx sdk.Context, valAddr sdk.ValAddress) sdk.Error {
-
+func (k Keeper) WithdrawValidatorCommission(ctx sdk.Context, valAddr sdk.ValAddress) (sdk.Coins, sdk.Error) {
 	// fetch validator accumulated commission
 	commission := k.GetValidatorAccumulatedCommission(ctx, valAddr)
 	if commission.IsZero() {
-		return types.ErrNoValidatorCommission(k.codespace)
+		return nil, types.ErrNoValidatorCommission(k.codespace)
 	}
 
 	coins, remainder := commission.TruncateDecimal()
-
-	// leave remainder to withdraw later
-	k.SetValidatorAccumulatedCommission(ctx, valAddr, remainder)
+	k.SetValidatorAccumulatedCommission(ctx, valAddr, remainder) // leave remainder to withdraw later
 
 	// update outstanding
 	outstanding := k.GetValidatorOutstandingRewards(ctx, valAddr)
@@ -91,10 +94,10 @@ func (k Keeper) WithdrawValidatorCommission(ctx sdk.Context, valAddr sdk.ValAddr
 		accAddr := sdk.AccAddress(valAddr)
 		withdrawAddr := k.GetDelegatorWithdrawAddr(ctx, accAddr)
 
-		if _, _, err := k.bankKeeper.AddCoins(ctx, withdrawAddr, coins); err != nil {
-			return err
+		if _, err := k.bankKeeper.AddCoins(ctx, withdrawAddr, coins); err != nil {
+			return nil, err
 		}
 	}
 
-	return nil
+	return coins, nil
 }

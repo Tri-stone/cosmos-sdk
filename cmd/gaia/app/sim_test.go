@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -29,7 +30,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/gov"
 	govsim "github.com/cosmos/cosmos-sdk/x/gov/simulation"
 	"github.com/cosmos/cosmos-sdk/x/mint"
-	"github.com/cosmos/cosmos-sdk/x/mock/simulation"
+	paramsim "github.com/cosmos/cosmos-sdk/x/params/simulation"
+	"github.com/cosmos/cosmos-sdk/x/simulation"
 	"github.com/cosmos/cosmos-sdk/x/slashing"
 	slashingsim "github.com/cosmos/cosmos-sdk/x/slashing/simulation"
 	"github.com/cosmos/cosmos-sdk/x/staking"
@@ -43,19 +45,30 @@ var (
 	blockSize   int
 	enabled     bool
 	verbose     bool
+	lean        bool
 	commit      bool
 	period      int
 )
 
 func init() {
-	flag.StringVar(&genesisFile, "SimulationGenesis", "", "Custom simulation genesis file")
-	flag.Int64Var(&seed, "SimulationSeed", 42, "Simulation random seed")
-	flag.IntVar(&numBlocks, "SimulationNumBlocks", 500, "Number of blocks")
-	flag.IntVar(&blockSize, "SimulationBlockSize", 200, "Operations per block")
-	flag.BoolVar(&enabled, "SimulationEnabled", false, "Enable the simulation")
-	flag.BoolVar(&verbose, "SimulationVerbose", false, "Verbose log output")
-	flag.BoolVar(&commit, "SimulationCommit", false, "Have the simulation commit")
-	flag.IntVar(&period, "SimulationPeriod", 1, "Run slow invariants only once every period assertions")
+	flag.StringVar(&genesisFile, "SimulationGenesis", "", "custom simulation genesis file")
+	flag.Int64Var(&seed, "SimulationSeed", 42, "simulation random seed")
+	flag.IntVar(&numBlocks, "SimulationNumBlocks", 500, "number of blocks")
+	flag.IntVar(&blockSize, "SimulationBlockSize", 200, "operations per block")
+	flag.BoolVar(&enabled, "SimulationEnabled", false, "enable the simulation")
+	flag.BoolVar(&verbose, "SimulationVerbose", false, "verbose log output")
+	flag.BoolVar(&lean, "SimulationLean", false, "lean simulation log output")
+	flag.BoolVar(&commit, "SimulationCommit", false, "have the simulation commit")
+	flag.IntVar(&period, "SimulationPeriod", 1, "run slow invariants only once every period assertions")
+}
+
+// helper function for populating input for SimulateFromSeed
+func getSimulateFromSeedInput(tb testing.TB, w io.Writer, app *GaiaApp) (
+	testing.TB, io.Writer, *baseapp.BaseApp, simulation.AppStateFn, int64,
+	simulation.WeightedOperations, sdk.Invariants, int, int, bool, bool) {
+
+	return tb, w, app.BaseApp, appStateFn, seed,
+		testAndRunTxs(app), invariants(app), numBlocks, blockSize, commit, lean
 }
 
 func appStateFromGenesisFileFn(r *rand.Rand, accs []simulation.Account, genesisTimestamp time.Time) (json.RawMessage, []simulation.Account, string) {
@@ -92,7 +105,7 @@ func appStateRandomizedFn(r *rand.Rand, accs []simulation.Account, genesisTimest
 		numInitiallyBonded = numAccs
 	}
 	fmt.Printf("Selected randomly generated parameters for simulated genesis:\n"+
-		"\t{amount of steak per account: %v, initially bonded validators: %v}\n",
+		"\t{amount of stake per account: %v, initially bonded validators: %v}\n",
 		amount, numInitiallyBonded)
 
 	// randomly generate some genesis accounts
@@ -108,7 +121,7 @@ func appStateRandomizedFn(r *rand.Rand, accs []simulation.Account, genesisTimest
 		if int64(i) > numInitiallyBonded && r.Intn(100) < 50 {
 			var (
 				vacc    auth.VestingAccount
-				endTime int
+				endTime int64
 			)
 
 			startTime := genesisTimestamp.Unix()
@@ -116,15 +129,19 @@ func appStateRandomizedFn(r *rand.Rand, accs []simulation.Account, genesisTimest
 			// Allow for some vesting accounts to vest very quickly while others very
 			// slowly.
 			if r.Intn(100) < 50 {
-				endTime = randIntBetween(r, int(startTime), int(startTime+(60*60*24*30)))
+				endTime = int64(simulation.RandIntBetween(r, int(startTime), int(startTime+(60*60*24*30))))
 			} else {
-				endTime = randIntBetween(r, int(startTime), int(startTime+(60*60*12)))
+				endTime = int64(simulation.RandIntBetween(r, int(startTime), int(startTime+(60*60*12))))
+			}
+
+			if startTime == endTime {
+				endTime += 1
 			}
 
 			if r.Intn(100) < 50 {
-				vacc = auth.NewContinuousVestingAccount(&bacc, startTime, int64(endTime))
+				vacc = auth.NewContinuousVestingAccount(&bacc, startTime, endTime)
 			} else {
-				vacc = auth.NewDelayedVestingAccount(&bacc, int64(endTime))
+				vacc = auth.NewDelayedVestingAccount(&bacc, endTime)
 			}
 
 			gacc = NewGenesisAccountI(vacc)
@@ -135,72 +152,76 @@ func appStateRandomizedFn(r *rand.Rand, accs []simulation.Account, genesisTimest
 		genesisAccounts = append(genesisAccounts, gacc)
 	}
 
-	authGenesis := auth.GenesisState{
-		Params: auth.Params{
-			MaxMemoCharacters:      uint64(randIntBetween(r, 100, 200)),
-			TxSigLimit:             uint64(r.Intn(7) + 1),
-			TxSizeCostPerByte:      uint64(randIntBetween(r, 5, 15)),
-			SigVerifyCostED25519:   uint64(randIntBetween(r, 500, 1000)),
-			SigVerifyCostSecp256k1: uint64(randIntBetween(r, 500, 1000)),
+	authGenesis := auth.NewGenesisState(
+		nil,
+		auth.Params{
+			MaxMemoCharacters:      simulation.ModuleParamSimulator["MaxMemoCharacters"](r).(uint64),
+			TxSigLimit:             simulation.ModuleParamSimulator["TxSigLimit"](r).(uint64),
+			TxSizeCostPerByte:      simulation.ModuleParamSimulator["TxSizeCostPerByte"](r).(uint64),
+			SigVerifyCostED25519:   simulation.ModuleParamSimulator["SigVerifyCostED25519"](r).(uint64),
+			SigVerifyCostSecp256k1: simulation.ModuleParamSimulator["SigVerifyCostSecp256k1"](r).(uint64),
 		},
-	}
+	)
 	fmt.Printf("Selected randomly generated auth parameters:\n\t%+v\n", authGenesis)
 
 	bankGenesis := bank.NewGenesisState(r.Int63n(2) == 0)
 	fmt.Printf("Selected randomly generated bank parameters:\n\t%+v\n", bankGenesis)
 
 	// Random genesis states
-	vp := time.Duration(r.Intn(2*172800)) * time.Second
-	govGenesis := gov.GenesisState{
-		StartingProposalID: uint64(r.Intn(100)),
-		DepositParams: gov.DepositParams{
-			MinDeposit:       sdk.Coins{sdk.NewInt64Coin(sdk.DefaultBondDenom, int64(r.Intn(1e3)))},
+	vp := simulation.ModuleParamSimulator["VotingParams/VotingPeriod"](r).(time.Duration)
+	govGenesis := gov.NewGenesisState(
+		uint64(r.Intn(100)),
+		gov.DepositParams{
+			MinDeposit:       simulation.ModuleParamSimulator["DepositParams/MinDeposit"](r).(sdk.Coins),
 			MaxDepositPeriod: vp,
 		},
-		VotingParams: gov.VotingParams{
+		gov.VotingParams{
 			VotingPeriod: vp,
 		},
-		TallyParams: gov.TallyParams{
-			Quorum:    sdk.NewDecWithPrec(334, 3),
-			Threshold: sdk.NewDecWithPrec(5, 1),
-			Veto:      sdk.NewDecWithPrec(334, 3),
+		gov.TallyParams{
+			Quorum:    simulation.ModuleParamSimulator["TallyParams/Quorum"](r).(sdk.Dec),
+			Threshold: simulation.ModuleParamSimulator["TallyParams/Threshold"](r).(sdk.Dec),
+			Veto:      simulation.ModuleParamSimulator["TallyParams/Veto"](r).(sdk.Dec),
 		},
-	}
+	)
 	fmt.Printf("Selected randomly generated governance parameters:\n\t%+v\n", govGenesis)
 
-	stakingGenesis := staking.GenesisState{
-		Pool: staking.InitialPool(),
-		Params: staking.Params{
-			UnbondingTime: time.Duration(randIntBetween(r, 60, 60*60*24*3*2)) * time.Second,
-			MaxValidators: uint16(r.Intn(250) + 1),
+	stakingGenesis := staking.NewGenesisState(
+		staking.InitialPool(),
+		staking.Params{
+			UnbondingTime: simulation.ModuleParamSimulator["UnbondingTime"](r).(time.Duration),
+			MaxValidators: simulation.ModuleParamSimulator["MaxValidators"](r).(uint16),
 			BondDenom:     sdk.DefaultBondDenom,
 		},
-	}
+		nil,
+		nil,
+	)
 	fmt.Printf("Selected randomly generated staking parameters:\n\t%+v\n", stakingGenesis)
 
 	slashingGenesis := slashing.GenesisState{
 		Params: slashing.Params{
 			MaxEvidenceAge:          stakingGenesis.Params.UnbondingTime,
-			SignedBlocksWindow:      int64(randIntBetween(r, 10, 1000)),
-			MinSignedPerWindow:      sdk.NewDecWithPrec(int64(r.Intn(10)), 1),
-			DowntimeJailDuration:    time.Duration(randIntBetween(r, 60, 60*60*24)) * time.Second,
-			SlashFractionDoubleSign: sdk.NewDec(1).Quo(sdk.NewDec(int64(r.Intn(50) + 1))),
-			SlashFractionDowntime:   sdk.NewDec(1).Quo(sdk.NewDec(int64(r.Intn(200) + 1))),
+			SignedBlocksWindow:      simulation.ModuleParamSimulator["SignedBlocksWindow"](r).(int64),
+			MinSignedPerWindow:      simulation.ModuleParamSimulator["MinSignedPerWindow"](r).(sdk.Dec),
+			DowntimeJailDuration:    simulation.ModuleParamSimulator["DowntimeJailDuration"](r).(time.Duration),
+			SlashFractionDoubleSign: simulation.ModuleParamSimulator["SlashFractionDoubleSign"](r).(sdk.Dec),
+			SlashFractionDowntime:   simulation.ModuleParamSimulator["SlashFractionDowntime"](r).(sdk.Dec),
 		},
 	}
 	fmt.Printf("Selected randomly generated slashing parameters:\n\t%+v\n", slashingGenesis)
 
-	mintGenesis := mint.GenesisState{
-		Minter: mint.InitialMinter(
+	mintGenesis := mint.NewGenesisState(
+		mint.InitialMinter(
 			sdk.NewDecWithPrec(int64(r.Intn(99)), 2)),
-		Params: mint.NewParams(
+		mint.NewParams(
 			sdk.DefaultBondDenom,
-			sdk.NewDecWithPrec(int64(r.Intn(99)), 2),
-			sdk.NewDecWithPrec(20, 2),
-			sdk.NewDecWithPrec(7, 2),
-			sdk.NewDecWithPrec(67, 2),
-			uint64(60*60*8766/5)),
-	}
+			simulation.ModuleParamSimulator["InflationRateChange"](r).(sdk.Dec),
+			simulation.ModuleParamSimulator["InflationMax"](r).(sdk.Dec),
+			simulation.ModuleParamSimulator["InflationMin"](r).(sdk.Dec),
+			simulation.ModuleParamSimulator["GoalBonded"](r).(sdk.Dec),
+			uint64(60*60*8766/5),
+		),
+	)
 	fmt.Printf("Selected randomly generated minting parameters:\n\t%+v\n", mintGenesis)
 
 	var validators []staking.Validator
@@ -258,19 +279,16 @@ func appStateFn(r *rand.Rand, accs []simulation.Account, genesisTimestamp time.T
 	return appStateRandomizedFn(r, accs, genesisTimestamp)
 }
 
-func randIntBetween(r *rand.Rand, min, max int) int {
-	return r.Intn(max-min) + min
-}
-
 func testAndRunTxs(app *GaiaApp) []simulation.WeightedOperation {
 	return []simulation.WeightedOperation{
 		{5, authsim.SimulateDeductFee(app.accountKeeper, app.feeCollectionKeeper)},
-		{100, banksim.SendMsg(app.accountKeeper, app.bankKeeper)},
-		{10, banksim.SingleInputMsgMultiSend(app.accountKeeper, app.bankKeeper)},
+		{100, banksim.SimulateMsgSend(app.accountKeeper, app.bankKeeper)},
+		{10, banksim.SimulateSingleInputMsgMultiSend(app.accountKeeper, app.bankKeeper)},
 		{50, distrsim.SimulateMsgSetWithdrawAddress(app.accountKeeper, app.distrKeeper)},
 		{50, distrsim.SimulateMsgWithdrawDelegatorReward(app.accountKeeper, app.distrKeeper)},
 		{50, distrsim.SimulateMsgWithdrawValidatorCommission(app.accountKeeper, app.distrKeeper)},
-		{5, govsim.SimulateSubmittingVotingAndSlashingForProposal(app.govKeeper)},
+		{5, govsim.SimulateSubmittingVotingAndSlashingForProposal(app.govKeeper, govsim.SimulateTextProposalContent)},
+		{5, govsim.SimulateSubmittingVotingAndSlashingForProposal(app.govKeeper, paramsim.SimulateParamChangeProposalContent)},
 		{100, govsim.SimulateMsgDeposit(app.govKeeper)},
 		{100, stakingsim.SimulateMsgCreateValidator(app.accountKeeper, app.stakingKeeper)},
 		{5, stakingsim.SimulateMsgEditValidator(app.stakingKeeper)},
@@ -282,14 +300,7 @@ func testAndRunTxs(app *GaiaApp) []simulation.WeightedOperation {
 }
 
 func invariants(app *GaiaApp) []sdk.Invariant {
-	return []sdk.Invariant{
-		simulation.PeriodicInvariant(banksim.NonnegativeBalanceInvariant(app.accountKeeper), period, 0),
-		simulation.PeriodicInvariant(govsim.AllInvariants(), period, 0),
-		simulation.PeriodicInvariant(distrsim.AllInvariants(app.distrKeeper, app.stakingKeeper), period, 0),
-		simulation.PeriodicInvariant(stakingsim.AllInvariants(app.stakingKeeper, app.feeCollectionKeeper,
-			app.distrKeeper, app.accountKeeper), period, 0),
-		simulation.PeriodicInvariant(slashingsim.AllInvariants(), period, 0),
-	}
+	return simulation.PeriodicInvariants(app.crisisKeeper.Invariants(), period, 0)
 }
 
 // Pass this in as an option to use a dbStoreAdapter instead of an IAVLStore for simulation speed.
@@ -310,18 +321,11 @@ func BenchmarkFullGaiaSimulation(b *testing.B) {
 		db.Close()
 		os.RemoveAll(dir)
 	}()
-	app := NewGaiaApp(logger, db, nil, true)
+	app := NewGaiaApp(logger, db, nil, true, 0)
 
 	// Run randomized simulation
 	// TODO parameterize numbers, save for a later PR
-	_, err := simulation.SimulateFromSeed(
-		b, app.BaseApp, appStateFn, seed,
-		testAndRunTxs(app),
-		invariants(app), // these shouldn't get ran
-		numBlocks,
-		blockSize,
-		commit,
-	)
+	_, err := simulation.SimulateFromSeed(getSimulateFromSeedInput(b, os.Stdout, app))
 	if err != nil {
 		fmt.Println(err)
 		b.Fail()
@@ -352,18 +356,11 @@ func TestFullGaiaSimulation(t *testing.T) {
 		db.Close()
 		os.RemoveAll(dir)
 	}()
-	app := NewGaiaApp(logger, db, nil, true, fauxMerkleModeOpt)
+	app := NewGaiaApp(logger, db, nil, true, 0, fauxMerkleModeOpt)
 	require.Equal(t, "GaiaApp", app.Name())
 
 	// Run randomized simulation
-	_, err := simulation.SimulateFromSeed(
-		t, app.BaseApp, appStateFn, seed,
-		testAndRunTxs(app),
-		invariants(app),
-		numBlocks,
-		blockSize,
-		commit,
-	)
+	_, err := simulation.SimulateFromSeed(getSimulateFromSeedInput(t, os.Stdout, app))
 	if commit {
 		// for memdb:
 		// fmt.Println("Database Size", db.Stats()["database.size"])
@@ -393,18 +390,12 @@ func TestGaiaImportExport(t *testing.T) {
 		db.Close()
 		os.RemoveAll(dir)
 	}()
-	app := NewGaiaApp(logger, db, nil, true, fauxMerkleModeOpt)
+	app := NewGaiaApp(logger, db, nil, true, 0, fauxMerkleModeOpt)
 	require.Equal(t, "GaiaApp", app.Name())
 
 	// Run randomized simulation
-	_, err := simulation.SimulateFromSeed(
-		t, app.BaseApp, appStateFn, seed,
-		testAndRunTxs(app),
-		invariants(app),
-		numBlocks,
-		blockSize,
-		commit,
-	)
+	_, err := simulation.SimulateFromSeed(getSimulateFromSeedInput(t, os.Stdout, app))
+
 	if commit {
 		// for memdb:
 		// fmt.Println("Database Size", db.Stats()["database.size"])
@@ -426,7 +417,7 @@ func TestGaiaImportExport(t *testing.T) {
 		newDB.Close()
 		os.RemoveAll(newDir)
 	}()
-	newApp := NewGaiaApp(log.NewNopLogger(), newDB, nil, true, fauxMerkleModeOpt)
+	newApp := NewGaiaApp(log.NewNopLogger(), newDB, nil, true, 0, fauxMerkleModeOpt)
 	require.Equal(t, "GaiaApp", newApp.Name())
 	var genesisState GenesisState
 	err = app.cdc.UnmarshalJSON(appState, &genesisState)
@@ -446,7 +437,8 @@ func TestGaiaImportExport(t *testing.T) {
 	storeKeysPrefixes := []StoreKeysPrefixes{
 		{app.keyMain, newApp.keyMain, [][]byte{}},
 		{app.keyAccount, newApp.keyAccount, [][]byte{}},
-		{app.keyStaking, newApp.keyStaking, [][]byte{staking.UnbondingQueueKey, staking.RedelegationQueueKey, staking.ValidatorQueueKey}}, // ordering may change but it doesn't matter
+		{app.keyStaking, newApp.keyStaking, [][]byte{staking.UnbondingQueueKey,
+			staking.RedelegationQueueKey, staking.ValidatorQueueKey}}, // ordering may change but it doesn't matter
 		{app.keySlashing, newApp.keySlashing, [][]byte{}},
 		{app.keyMint, newApp.keyMint, [][]byte{}},
 		{app.keyDistr, newApp.keyDistr, [][]byte{}},
@@ -488,18 +480,12 @@ func TestGaiaSimulationAfterImport(t *testing.T) {
 		db.Close()
 		os.RemoveAll(dir)
 	}()
-	app := NewGaiaApp(logger, db, nil, true, fauxMerkleModeOpt)
+	app := NewGaiaApp(logger, db, nil, true, 0, fauxMerkleModeOpt)
 	require.Equal(t, "GaiaApp", app.Name())
 
 	// Run randomized simulation
-	stopEarly, err := simulation.SimulateFromSeed(
-		t, app.BaseApp, appStateFn, seed,
-		testAndRunTxs(app),
-		invariants(app),
-		numBlocks,
-		blockSize,
-		commit,
-	)
+	stopEarly, err := simulation.SimulateFromSeed(getSimulateFromSeedInput(t, os.Stdout, app))
+
 	if commit {
 		// for memdb:
 		// fmt.Println("Database Size", db.Stats()["database.size"])
@@ -530,21 +516,14 @@ func TestGaiaSimulationAfterImport(t *testing.T) {
 		newDB.Close()
 		os.RemoveAll(newDir)
 	}()
-	newApp := NewGaiaApp(log.NewNopLogger(), newDB, nil, true, fauxMerkleModeOpt)
+	newApp := NewGaiaApp(log.NewNopLogger(), newDB, nil, true, 0, fauxMerkleModeOpt)
 	require.Equal(t, "GaiaApp", newApp.Name())
 	newApp.InitChain(abci.RequestInitChain{
 		AppStateBytes: appState,
 	})
 
 	// Run randomized simulation on imported app
-	_, err = simulation.SimulateFromSeed(
-		t, newApp.BaseApp, appStateFn, seed,
-		testAndRunTxs(newApp),
-		invariants(newApp),
-		numBlocks,
-		blockSize,
-		commit,
-	)
+	_, err = simulation.SimulateFromSeed(getSimulateFromSeedInput(t, os.Stdout, newApp))
 	require.Nil(t, err)
 
 }
@@ -565,16 +544,17 @@ func TestAppStateDeterminism(t *testing.T) {
 		for j := 0; j < numTimesToRunPerSeed; j++ {
 			logger := log.NewNopLogger()
 			db := dbm.NewMemDB()
-			app := NewGaiaApp(logger, db, nil, true)
+			app := NewGaiaApp(logger, db, nil, true, 0)
 
 			// Run randomized simulation
 			simulation.SimulateFromSeed(
-				t, app.BaseApp, appStateFn, seed,
+				t, os.Stdout, app.BaseApp, appStateFn, seed,
 				testAndRunTxs(app),
 				[]sdk.Invariant{},
 				50,
 				100,
 				true,
+				false,
 			)
 			appHash := app.LastCommitID().Hash
 			appHashList[j] = appHash
@@ -582,5 +562,44 @@ func TestAppStateDeterminism(t *testing.T) {
 		for k := 1; k < numTimesToRunPerSeed; k++ {
 			require.Equal(t, appHashList[0], appHashList[k], "appHash list: %v", appHashList)
 		}
+	}
+}
+
+func BenchmarkInvariants(b *testing.B) {
+	// 1. Setup a simulated Gaia application
+	logger := log.NewNopLogger()
+	dir, _ := ioutil.TempDir("", "goleveldb-gaia-invariant-bench")
+	db, _ := sdk.NewLevelDB("simulation", dir)
+
+	defer func() {
+		db.Close()
+		os.RemoveAll(dir)
+	}()
+
+	app := NewGaiaApp(logger, db, nil, true, 0)
+
+	// 2. Run parameterized simulation (w/o invariants)
+	_, err := simulation.SimulateFromSeed(
+		b, ioutil.Discard, app.BaseApp, appStateFn, seed, testAndRunTxs(app),
+		[]sdk.Invariant{}, numBlocks, blockSize, commit, lean,
+	)
+	if err != nil {
+		fmt.Println(err)
+		b.FailNow()
+	}
+
+	ctx := app.NewContext(true, abci.Header{Height: app.LastBlockHeight() + 1})
+
+	// 3. Benchmark each invariant separately
+	//
+	// NOTE: We use the crisis keeper as it has all the invariants registered with
+	// their respective metadata which makes it useful for testing/benchmarking.
+	for _, cr := range app.crisisKeeper.Routes() {
+		b.Run(fmt.Sprintf("%s/%s", cr.ModuleName, cr.Route), func(b *testing.B) {
+			if err := cr.Invar(ctx); err != nil {
+				fmt.Println(err)
+				b.FailNow()
+			}
+		})
 	}
 }

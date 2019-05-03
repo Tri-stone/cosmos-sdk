@@ -9,7 +9,7 @@ import (
 
 // Called every block, process inflation, update validator set
 func EndBlocker(ctx sdk.Context, keeper Keeper) sdk.Tags {
-	logger := ctx.Logger().With("module", "x/gov")
+	logger := keeper.Logger(ctx)
 	resTags := sdk.NewTags()
 
 	inactiveIterator := keeper.InactiveProposalQueueIterator(ctx, ctx.BlockHeader().Time)
@@ -18,7 +18,10 @@ func EndBlocker(ctx sdk.Context, keeper Keeper) sdk.Tags {
 		var proposalID uint64
 
 		keeper.cdc.MustUnmarshalBinaryLengthPrefixed(inactiveIterator.Value(), &proposalID)
-		inactiveProposal := keeper.GetProposal(ctx, proposalID)
+		inactiveProposal, ok := keeper.GetProposal(ctx, proposalID)
+		if !ok {
+			panic(fmt.Sprintf("proposal %d does not exist", proposalID))
+		}
 
 		keeper.DeleteProposal(ctx, proposalID)
 		keeper.DeleteDeposits(ctx, proposalID) // delete any associated deposits (burned)
@@ -28,10 +31,10 @@ func EndBlocker(ctx sdk.Context, keeper Keeper) sdk.Tags {
 
 		logger.Info(
 			fmt.Sprintf("proposal %d (%s) didn't meet minimum deposit of %s (had only %s); deleted",
-				inactiveProposal.GetProposalID(),
+				inactiveProposal.ProposalID,
 				inactiveProposal.GetTitle(),
 				keeper.GetDepositParams(ctx).MinDeposit,
-				inactiveProposal.GetTotalDeposit(),
+				inactiveProposal.TotalDeposit,
 			),
 		)
 	}
@@ -43,28 +46,53 @@ func EndBlocker(ctx sdk.Context, keeper Keeper) sdk.Tags {
 		var proposalID uint64
 
 		keeper.cdc.MustUnmarshalBinaryLengthPrefixed(activeIterator.Value(), &proposalID)
-		activeProposal := keeper.GetProposal(ctx, proposalID)
+		activeProposal, ok := keeper.GetProposal(ctx, proposalID)
+		if !ok {
+			panic(fmt.Sprintf("proposal %d does not exist", proposalID))
+		}
 		passes, tallyResults := tally(ctx, keeper, activeProposal)
 
-		var tagValue string
+		var tagValue, logMsg string
+
 		if passes {
-			keeper.RefundDeposits(ctx, activeProposal.GetProposalID())
-			activeProposal.SetStatus(StatusPassed)
-			tagValue = tags.ActionProposalPassed
+			keeper.RefundDeposits(ctx, activeProposal.ProposalID)
+
+			handler := keeper.router.GetRoute(activeProposal.ProposalRoute())
+			cacheCtx, writeCache := ctx.CacheContext()
+
+			// The proposal handler may execute state mutating logic depending
+			// on the proposal content. If the handler fails, no state mutation
+			// is written and the error message is logged.
+			err := handler(cacheCtx, activeProposal.Content)
+			if err == nil {
+				activeProposal.Status = StatusPassed
+				tagValue = tags.ActionProposalPassed
+				logMsg = "passed"
+
+				// write state to the underlying multi-store
+				writeCache()
+			} else {
+				activeProposal.Status = StatusFailed
+				tagValue = tags.ActionProposalFailed
+				logMsg = fmt.Sprintf("passed, but failed on execution: %s", err.ABCILog())
+			}
 		} else {
-			keeper.DeleteDeposits(ctx, activeProposal.GetProposalID())
-			activeProposal.SetStatus(StatusRejected)
+			keeper.DeleteDeposits(ctx, activeProposal.ProposalID)
+
+			activeProposal.Status = StatusRejected
 			tagValue = tags.ActionProposalRejected
+			logMsg = "rejected"
 		}
 
-		activeProposal.SetFinalTallyResult(tallyResults)
+		activeProposal.FinalTallyResult = tallyResults
+
 		keeper.SetProposal(ctx, activeProposal)
-		keeper.RemoveFromActiveProposalQueue(ctx, activeProposal.GetVotingEndTime(), activeProposal.GetProposalID())
+		keeper.RemoveFromActiveProposalQueue(ctx, activeProposal.VotingEndTime, activeProposal.ProposalID)
 
 		logger.Info(
 			fmt.Sprintf(
-				"proposal %d (%s) tallied; passed: %v",
-				activeProposal.GetProposalID(), activeProposal.GetTitle(), passes,
+				"proposal %d (%s) tallied; result: %s",
+				activeProposal.ProposalID, activeProposal.GetTitle(), logMsg,
 			),
 		)
 
