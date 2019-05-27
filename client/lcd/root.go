@@ -3,11 +3,10 @@ package lcd
 import (
 	"fmt"
 	"net"
-	"net/http"
 	"os"
+	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/rakyll/statik/fs"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tendermint/tendermint/libs/log"
@@ -18,9 +17,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec"
 	keybase "github.com/cosmos/cosmos-sdk/crypto/keys"
 	"github.com/cosmos/cosmos-sdk/server"
-
-	// Import statik for light client stuff
-	_ "github.com/cosmos/cosmos-sdk/client/lcd/statik"
 )
 
 // RestServer represents the Light Client Rest server
@@ -45,20 +41,22 @@ func NewRestServer(cdc *codec.Codec) *RestServer {
 		Mux:    r,
 		CliCtx: cliCtx,
 		Cdc:    cdc,
-
-		log: logger,
+		log:    logger,
 	}
 }
 
 // Start starts the rest server
-func (rs *RestServer) Start(listenAddr string, maxOpen int) (err error) {
+func (rs *RestServer) Start(listenAddr string, maxOpen int, readTimeout, writeTimeout uint) (err error) {
 	server.TrapSignal(func() {
 		err := rs.listener.Close()
 		rs.log.Error("error closing listener", "err", err)
 	})
 
-	cfg := rpcserver.DefaultConfig()
-	cfg.MaxOpenConnections = maxOpen
+	cfg := &rpcserver.Config{
+		MaxOpenConnections: maxOpen,
+		ReadTimeout:        time.Duration(readTimeout) * time.Second,
+		WriteTimeout:       time.Duration(writeTimeout) * time.Second,
+	}
 
 	rs.listener, err = rpcserver.Listen(listenAddr, cfg)
 	if err != nil {
@@ -66,7 +64,7 @@ func (rs *RestServer) Start(listenAddr string, maxOpen int) (err error) {
 	}
 	rs.log.Info(
 		fmt.Sprintf(
-			"Starting Gaia Lite REST service (chain-id: %q)...",
+			"Starting application REST service (chain-id: %q)...",
 			viper.GetString(client.FlagChainID),
 		),
 	)
@@ -74,7 +72,7 @@ func (rs *RestServer) Start(listenAddr string, maxOpen int) (err error) {
 	return rpcserver.StartHTTPServer(rs.listener, rs.Mux, rs.log, cfg)
 }
 
-// ServeCommand will start a Gaia Lite REST service as a blocking process. It
+// ServeCommand will start the application REST service as a blocking process. It
 // takes a codec to create a RestServer object and a function to register all
 // necessary routes.
 func ServeCommand(cdc *codec.Codec, registerRoutesFn func(*RestServer)) *cobra.Command {
@@ -87,21 +85,16 @@ func ServeCommand(cdc *codec.Codec, registerRoutesFn func(*RestServer)) *cobra.C
 			registerRoutesFn(rs)
 
 			// Start the rest server and return error if one exists
-			err = rs.Start(viper.GetString(client.FlagListenAddr),
-				viper.GetInt(client.FlagMaxOpenConnections))
+			err = rs.Start(
+				viper.GetString(client.FlagListenAddr),
+				viper.GetInt(client.FlagMaxOpenConnections),
+				uint(viper.GetInt(client.FlagRPCReadTimeout)),
+				uint(viper.GetInt(client.FlagRPCWriteTimeout)),
+			)
 
 			return err
 		},
 	}
 
 	return client.RegisterRestServerFlags(cmd)
-}
-
-func (rs *RestServer) registerSwaggerUI() {
-	statikFS, err := fs.New()
-	if err != nil {
-		panic(err)
-	}
-	staticServer := http.FileServer(statikFS)
-	rs.Mux.PathPrefix("/swagger-ui/").Handler(http.StripPrefix("/swagger-ui/", staticServer))
 }

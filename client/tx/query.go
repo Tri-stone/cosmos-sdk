@@ -37,7 +37,7 @@ func SearchTxCmd(cdc *codec.Codec) *cobra.Command {
 Search for transactions that match the exact given tags where results are paginated.
 
 Example:
-$ gaiacli query txs --tags '<tag1>:<value1>&<tag2>:<value2>' --page 1 --limit 30
+$ <appcli> query txs --tags '<tag1>:<value1>&<tag2>:<value2>' --page 1 --limit 30
 `),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tagsStr := viper.GetString(flagTags)
@@ -167,13 +167,13 @@ func QueryTxsByTagsRequestHandlerFn(cliCtx context.CLIContext, cdc *codec.Codec)
 			return
 		}
 
-		txs, err = SearchTxs(cliCtx, cdc, tags, page, limit)
+		searchResult, err := SearchTxs(cliCtx, cdc, tags, page, limit)
 		if err != nil {
 			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		rest.PostProcessResponse(w, cdc, txs, cliCtx.Indent)
+		rest.PostProcessResponse(w, cdc, searchResult, cliCtx.Indent)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/gov"
 	"github.com/cosmos/cosmos-sdk/x/params"
@@ -59,7 +60,7 @@ var paramChangePool = []simParamChange{
 		"MinSignedPerWindow",
 		"",
 		func(r *rand.Rand) string {
-			return fmt.Sprintf("\"%d\"", simulation.ModuleParamSimulator["MinSignedPerWindow"](r).(sdk.Dec))
+			return fmt.Sprintf("\"%s\"", simulation.ModuleParamSimulator["MinSignedPerWindow"](r).(sdk.Dec))
 		},
 	},
 	{
@@ -67,7 +68,7 @@ var paramChangePool = []simParamChange{
 		"SlashFractionDowntime",
 		"",
 		func(r *rand.Rand) string {
-			return fmt.Sprintf("\"%d\"", simulation.ModuleParamSimulator["SlashFractionDowntime"](r).(sdk.Dec))
+			return fmt.Sprintf("\"%s\"", simulation.ModuleParamSimulator["SlashFractionDowntime"](r).(sdk.Dec))
 		},
 	},
 	// minting parameters
@@ -76,7 +77,7 @@ var paramChangePool = []simParamChange{
 		"InflationRateChange",
 		"",
 		func(r *rand.Rand) string {
-			return fmt.Sprintf("\"%d\"", simulation.ModuleParamSimulator["InflationRateChange"](r).(sdk.Dec))
+			return fmt.Sprintf("\"%s\"", simulation.ModuleParamSimulator["InflationRateChange"](r).(sdk.Dec))
 		},
 	},
 	// auth parameters
@@ -109,7 +110,7 @@ var paramChangePool = []simParamChange{
 // SimulateParamChangeProposalContent returns random parameter change content.
 // It will generate a ParameterChangeProposal object with anywhere between 1 and
 // 3 parameter changes all of which have random, but valid values.
-func SimulateParamChangeProposalContent(r *rand.Rand) gov.Content {
+func SimulateParamChangeProposalContent(r *rand.Rand, _ *baseapp.BaseApp, _ sdk.Context, _ []simulation.Account) gov.Content {
 	numChanges := simulation.RandIntBetween(r, 1, len(paramChangePool)/2)
 	paramChanges := make([]params.ParamChange, numChanges, numChanges)
 	paramChangesKeys := make(map[string]struct{})
