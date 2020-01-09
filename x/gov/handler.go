@@ -4,12 +4,15 @@ import (
 	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/x/gov/tags"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
+	"github.com/cosmos/cosmos-sdk/x/gov/types"
 )
 
-// Handle all "gov" type messages.
+// NewHandler creates an sdk.Handler for all the gov type messages
 func NewHandler(keeper Keeper) sdk.Handler {
-	return func(ctx sdk.Context, msg sdk.Msg) sdk.Result {
+	return func(ctx sdk.Context, msg sdk.Msg) (*sdk.Result, error) {
+		ctx = ctx.WithEventManager(sdk.NewEventManager())
+
 		switch msg := msg.(type) {
 		case MsgDeposit:
 			return handleMsgDeposit(ctx, keeper, msg)
@@ -21,76 +24,83 @@ func NewHandler(keeper Keeper) sdk.Handler {
 			return handleMsgVote(ctx, keeper, msg)
 
 		default:
-			errMsg := fmt.Sprintf("unrecognized gov message type: %T", msg)
-			return sdk.ErrUnknownRequest(errMsg).Result()
+			return nil, sdkerrors.Wrapf(sdkerrors.ErrUnknownRequest, "unrecognized %s message type: %T", ModuleName, msg)
 		}
 	}
 }
 
-func handleMsgSubmitProposal(ctx sdk.Context, keeper Keeper, msg MsgSubmitProposal) sdk.Result {
+func handleMsgSubmitProposal(ctx sdk.Context, keeper Keeper, msg MsgSubmitProposal) (*sdk.Result, error) {
 	proposal, err := keeper.SubmitProposal(ctx, msg.Content)
 	if err != nil {
-		return err.Result()
+		return nil, err
 	}
 
-	err, votingStarted := keeper.AddDeposit(ctx, proposal.ProposalID, msg.Proposer, msg.InitialDeposit)
+	votingStarted, err := keeper.AddDeposit(ctx, proposal.ProposalID, msg.Proposer, msg.InitialDeposit)
 	if err != nil {
-		return err.Result()
+		return nil, err
 	}
 
-	proposalIDStr := fmt.Sprintf("%d", proposal.ProposalID)
-	resTags := sdk.NewTags(
-		tags.ProposalID, proposalIDStr,
-		tags.Category, tags.TxCategory,
-		tags.Sender, msg.Proposer.String(),
+	ctx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			sdk.EventTypeMessage,
+			sdk.NewAttribute(sdk.AttributeKeyModule, types.AttributeValueCategory),
+			sdk.NewAttribute(sdk.AttributeKeySender, msg.Proposer.String()),
+		),
+	)
+
+	submitEvent := sdk.NewEvent(types.EventTypeSubmitProposal, sdk.NewAttribute(types.AttributeKeyProposalType, msg.Content.ProposalType()))
+	if votingStarted {
+		submitEvent = submitEvent.AppendAttributes(
+			sdk.NewAttribute(types.AttributeKeyVotingPeriodStart, fmt.Sprintf("%d", proposal.ProposalID)),
+		)
+	}
+	ctx.EventManager().EmitEvent(submitEvent)
+
+	return &sdk.Result{
+		Data:   GetProposalIDBytes(proposal.ProposalID),
+		Events: ctx.EventManager().Events(),
+	}, nil
+}
+
+func handleMsgDeposit(ctx sdk.Context, keeper Keeper, msg MsgDeposit) (*sdk.Result, error) {
+	votingStarted, err := keeper.AddDeposit(ctx, msg.ProposalID, msg.Depositor, msg.Amount)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			sdk.EventTypeMessage,
+			sdk.NewAttribute(sdk.AttributeKeyModule, types.AttributeValueCategory),
+			sdk.NewAttribute(sdk.AttributeKeySender, msg.Depositor.String()),
+		),
 	)
 
 	if votingStarted {
-		resTags = resTags.AppendTag(tags.VotingPeriodStart, proposalIDStr)
+		ctx.EventManager().EmitEvent(
+			sdk.NewEvent(
+				types.EventTypeProposalDeposit,
+				sdk.NewAttribute(types.AttributeKeyVotingPeriodStart, fmt.Sprintf("%d", msg.ProposalID)),
+			),
+		)
 	}
 
-	return sdk.Result{
-		Data: keeper.cdc.MustMarshalBinaryLengthPrefixed(proposal.ProposalID),
-		Tags: resTags,
-	}
+	return &sdk.Result{Events: ctx.EventManager().Events()}, nil
 }
 
-func handleMsgDeposit(ctx sdk.Context, keeper Keeper, msg MsgDeposit) sdk.Result {
-	err, votingStarted := keeper.AddDeposit(ctx, msg.ProposalID, msg.Depositor, msg.Amount)
-	if err != nil {
-		return err.Result()
-	}
-
-	proposalIDStr := fmt.Sprintf("%d", msg.ProposalID)
-
-	resTags := sdk.NewTags(
-		tags.ProposalID, proposalIDStr,
-		tags.Category, tags.TxCategory,
-		tags.Sender, msg.Depositor.String(),
-	)
-
-	if votingStarted {
-		resTags = resTags.AppendTag(tags.VotingPeriodStart, proposalIDStr)
-	}
-
-	return sdk.Result{
-		Tags: resTags,
-	}
-}
-
-func handleMsgVote(ctx sdk.Context, keeper Keeper, msg MsgVote) sdk.Result {
+func handleMsgVote(ctx sdk.Context, keeper Keeper, msg MsgVote) (*sdk.Result, error) {
 	err := keeper.AddVote(ctx, msg.ProposalID, msg.Voter, msg.Option)
 	if err != nil {
-		return err.Result()
+		return nil, err
 	}
 
-	proposalIDStr := fmt.Sprintf("%d", msg.ProposalID)
-
-	return sdk.Result{
-		Tags: sdk.NewTags(
-			tags.ProposalID, proposalIDStr,
-			tags.Category, tags.TxCategory,
-			tags.Sender, msg.Voter.String(),
+	ctx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			sdk.EventTypeMessage,
+			sdk.NewAttribute(sdk.AttributeKeyModule, types.AttributeValueCategory),
+			sdk.NewAttribute(sdk.AttributeKeySender, msg.Voter.String()),
 		),
-	}
+	)
+
+	return &sdk.Result{Events: ctx.EventManager().Events()}, nil
 }

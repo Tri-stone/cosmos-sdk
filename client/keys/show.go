@@ -4,18 +4,17 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cosmos/cosmos-sdk/client"
-
-	"github.com/cosmos/cosmos-sdk/crypto"
-	"github.com/cosmos/cosmos-sdk/crypto/keys"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	tmcrypto "github.com/tendermint/tendermint/crypto"
 	"github.com/tendermint/tendermint/crypto/multisig"
 	"github.com/tendermint/tendermint/libs/cli"
+
+	"github.com/cosmos/cosmos-sdk/client/flags"
+	"github.com/cosmos/cosmos-sdk/crypto"
+	"github.com/cosmos/cosmos-sdk/crypto/keys"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 const (
@@ -29,12 +28,12 @@ const (
 	FlagDevice = "device"
 
 	flagMultiSigThreshold = "multisig-threshold"
-	flagShowMultiSig      = "show-multisig"
 
 	defaultMultiSigKeyName = "multi"
 )
 
-func showKeysCmd() *cobra.Command {
+// ShowKeysCmd shows key information for a given key name.
+func ShowKeysCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show [name [name...]]",
 		Short: "Show key info for the given name",
@@ -50,8 +49,7 @@ consisting of all the keys provided by name and multisig threshold.`,
 	cmd.Flags().BoolP(FlagPublicKey, "p", false, "Output the public key only (overrides --output)")
 	cmd.Flags().BoolP(FlagDevice, "d", false, "Output the address in a ledger device")
 	cmd.Flags().Uint(flagMultiSigThreshold, 1, "K out of N required signatures")
-	cmd.Flags().BoolP(flagShowMultiSig, "m", false, "Output multisig pubkey constituents, threshold, and weights")
-	cmd.Flags().Bool(client.FlagIndentResponse, false, "Add indent to JSON response")
+	cmd.Flags().Bool(flags.FlagIndentResponse, false, "Add indent to JSON response")
 
 	return cmd
 }
@@ -59,15 +57,19 @@ consisting of all the keys provided by name and multisig threshold.`,
 func runShowCmd(cmd *cobra.Command, args []string) (err error) {
 	var info keys.Info
 
+	kb, err := NewKeyringFromHomeFlag(cmd.InOrStdin())
+	if err != nil {
+		return err
+	}
 	if len(args) == 1 {
-		info, err = GetKeyInfo(args[0])
+		info, err = kb.Get(args[0])
 		if err != nil {
 			return err
 		}
 	} else {
 		pks := make([]tmcrypto.PubKey, len(args))
 		for i, keyName := range args {
-			info, err := GetKeyInfo(keyName)
+			info, err := kb.Get(keyName)
 			if err != nil {
 				return err
 			}
@@ -88,7 +90,6 @@ func runShowCmd(cmd *cobra.Command, args []string) (err error) {
 	isShowAddr := viper.GetBool(FlagAddress)
 	isShowPubKey := viper.GetBool(FlagPublicKey)
 	isShowDevice := viper.GetBool(FlagDevice)
-	isShowMultiSig := viper.GetBool(flagShowMultiSig)
 
 	isOutputSet := false
 	tmp := cmd.Flag(cli.OutputFlag)
@@ -114,8 +115,6 @@ func runShowCmd(cmd *cobra.Command, args []string) (err error) {
 		printKeyAddress(info, bechKeyOut)
 	case isShowPubKey:
 		printPubKey(info, bechKeyOut)
-	case isShowMultiSig:
-		printMultiSigKeyInfo(info, bechKeyOut)
 	default:
 		printKeyInfo(info, bechKeyOut)
 	}

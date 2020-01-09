@@ -2,30 +2,29 @@ package client
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
 	"strconv"
 
-	"github.com/tendermint/tendermint/libs/cli"
-
 	toml "github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/cosmos/cosmos-sdk/client/flags"
 )
 
 const (
 	flagGet = "get"
-
-	// DefaultKeyPass contains the default key password for genesis transactions
-	DefaultKeyPass = "12345678"
 )
 
 var configDefaults = map[string]string{
-	"chain-id":       "",
-	"output":         "text",
-	"node":           "tcp://localhost:26657",
-	"broadcast-mode": "sync",
+	"chain-id":        "",
+	"keyring-backend": "os",
+	"output":          "text",
+	"node":            "tcp://localhost:26657",
+	"broadcast-mode":  "sync",
 }
 
 // ConfigCmd returns a CLI command to interactively create an application CLI
@@ -38,7 +37,7 @@ func ConfigCmd(defaultCLIHome string) *cobra.Command {
 		Args:  cobra.RangeArgs(0, 2),
 	}
 
-	cmd.Flags().String(cli.HomeFlag, defaultCLIHome,
+	cmd.Flags().String(flags.FlagHome, defaultCLIHome,
 		"set client's home directory for configuration")
 	cmd.Flags().Bool(flagGet, false,
 		"print configuration value or its default if unset")
@@ -46,7 +45,7 @@ func ConfigCmd(defaultCLIHome string) *cobra.Command {
 }
 
 func runConfigCmd(cmd *cobra.Command, args []string) error {
-	cfgFile, err := ensureConfFile(viper.GetString(cli.HomeFlag))
+	cfgFile, err := ensureConfFile(viper.GetString(flags.FlagHome))
 	if err != nil {
 		return err
 	}
@@ -100,7 +99,7 @@ func runConfigCmd(cmd *cobra.Command, args []string) error {
 
 	// set config value for a given key
 	switch key {
-	case "chain-id", "output", "node", "broadcast-mode":
+	case "chain-id", "output", "node", "broadcast-mode", "keyring-backend":
 		tree.Set(key, value)
 
 	case "trace", "trust-node", "indent":
@@ -152,7 +151,7 @@ func loadConfigFile(cfgFile string) (*toml.Tree, error) {
 	return tree, nil
 }
 
-func saveConfigFile(cfgFile string, tree *toml.Tree) error {
+func saveConfigFile(cfgFile string, tree io.WriterTo) error {
 	fp, err := os.OpenFile(cfgFile, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
 	if err != nil {
 		return err

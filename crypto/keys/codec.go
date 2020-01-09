@@ -1,16 +1,24 @@
 package keys
 
 import (
-	amino "github.com/tendermint/go-amino"
 	cryptoAmino "github.com/tendermint/tendermint/crypto/encoding/amino"
 
+	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/hd"
 )
 
-var cdc = amino.NewCodec()
+// CryptoCdc defines the codec required for keys and info
+var CryptoCdc *codec.Codec
 
 func init() {
-	cryptoAmino.RegisterAmino(cdc)
+	CryptoCdc = codec.New()
+	cryptoAmino.RegisterAmino(CryptoCdc)
+	RegisterCodec(CryptoCdc)
+	CryptoCdc.Seal()
+}
+
+// RegisterCodec registers concrete types and interfaces on the given codec.
+func RegisterCodec(cdc *codec.Codec) {
 	cdc.RegisterInterface((*Info)(nil), nil)
 	cdc.RegisterConcrete(hd.BIP44Params{}, "crypto/keys/hd/BIP44Params", nil)
 	cdc.RegisterConcrete(localInfo{}, "crypto/keys/localInfo", nil)

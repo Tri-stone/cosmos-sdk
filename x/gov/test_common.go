@@ -1,7 +1,10 @@
+// nolint
+// DONTCOVER
 package gov
 
 import (
 	"bytes"
+	"errors"
 	"log"
 	"sort"
 	"testing"
@@ -13,49 +16,87 @@ import (
 	"github.com/tendermint/tendermint/crypto"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/x/auth"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
+	authexported "github.com/cosmos/cosmos-sdk/x/auth/exported"
 	"github.com/cosmos/cosmos-sdk/x/bank"
+	keep "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	"github.com/cosmos/cosmos-sdk/x/gov/types"
 	"github.com/cosmos/cosmos-sdk/x/mock"
 	"github.com/cosmos/cosmos-sdk/x/staking"
+	"github.com/cosmos/cosmos-sdk/x/supply"
+	supplyexported "github.com/cosmos/cosmos-sdk/x/supply/exported"
+)
+
+var (
+	valTokens  = sdk.TokensFromConsensusPower(42)
+	initTokens = sdk.TokensFromConsensusPower(100000)
+	valCoins   = sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, valTokens))
+	initCoins  = sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, initTokens))
 )
 
 type testInput struct {
 	mApp     *mock.App
-	keeper   Keeper
-	router   Router
+	keeper   keep.Keeper
+	router   types.Router
 	sk       staking.Keeper
 	addrs    []sdk.AccAddress
 	pubKeys  []crypto.PubKey
 	privKeys []crypto.PrivKey
 }
 
-func getMockApp(t *testing.T, numGenAccs int, genState GenesisState, genAccs []auth.Account) testInput {
+func getMockApp(
+	t *testing.T, numGenAccs int, genState types.GenesisState, genAccs []authexported.Account,
+	handler func(ctx sdk.Context, c types.Content) error,
+) testInput {
+
 	mApp := mock.NewApp()
 
 	staking.RegisterCodec(mApp.Cdc)
-	RegisterCodec(mApp.Cdc)
+	types.RegisterCodec(mApp.Cdc)
+	supply.RegisterCodec(mApp.Cdc)
 
 	keyStaking := sdk.NewKVStoreKey(staking.StoreKey)
-	tKeyStaking := sdk.NewTransientStoreKey(staking.TStoreKey)
-	keyGov := sdk.NewKVStoreKey(StoreKey)
+	keyGov := sdk.NewKVStoreKey(types.StoreKey)
+	keySupply := sdk.NewKVStoreKey(supply.StoreKey)
 
-	rtr := NewRouter().AddRoute(RouterKey, ProposalHandler)
+	govAcc := supply.NewEmptyModuleAccount(types.ModuleName, supply.Burner)
+	notBondedPool := supply.NewEmptyModuleAccount(staking.NotBondedPoolName, supply.Burner, supply.Staking)
+	bondPool := supply.NewEmptyModuleAccount(staking.BondedPoolName, supply.Burner, supply.Staking)
+
+	blacklistedAddrs := make(map[string]bool)
+	blacklistedAddrs[govAcc.GetAddress().String()] = true
+	blacklistedAddrs[notBondedPool.GetAddress().String()] = true
+	blacklistedAddrs[bondPool.GetAddress().String()] = true
 
 	pk := mApp.ParamsKeeper
-	ck := bank.NewBaseKeeper(mApp.AccountKeeper, mApp.ParamsKeeper.Subspace(bank.DefaultParamspace), bank.DefaultCodespace)
-	sk := staking.NewKeeper(mApp.Cdc, keyStaking, tKeyStaking, ck, pk.Subspace(staking.DefaultParamspace), staking.DefaultCodespace)
-	keeper := NewKeeper(mApp.Cdc, keyGov, pk, pk.Subspace("testgov"), ck, sk, DefaultCodespace, rtr)
 
-	mApp.Router().AddRoute(RouterKey, NewHandler(keeper))
-	mApp.QueryRouter().AddRoute(QuerierRoute, NewQuerier(keeper))
+	rtr := types.NewRouter().
+		AddRoute(types.RouterKey, handler)
+
+	bk := bank.NewBaseKeeper(mApp.AccountKeeper, mApp.ParamsKeeper.Subspace(bank.DefaultParamspace), blacklistedAddrs)
+
+	maccPerms := map[string][]string{
+		types.ModuleName:          {supply.Burner},
+		staking.NotBondedPoolName: {supply.Burner, supply.Staking},
+		staking.BondedPoolName:    {supply.Burner, supply.Staking},
+	}
+	supplyKeeper := supply.NewKeeper(mApp.Cdc, keySupply, mApp.AccountKeeper, bk, maccPerms)
+	sk := staking.NewKeeper(
+		mApp.Cdc, keyStaking, supplyKeeper, pk.Subspace(staking.DefaultParamspace),
+	)
+
+	keeper := keep.NewKeeper(
+		mApp.Cdc, keyGov, pk.Subspace(DefaultParamspace).WithKeyTable(ParamKeyTable()), supplyKeeper, sk, rtr,
+	)
+
+	mApp.Router().AddRoute(types.RouterKey, NewHandler(keeper))
+	mApp.QueryRouter().AddRoute(types.QuerierRoute, keep.NewQuerier(keeper))
 
 	mApp.SetEndBlocker(getEndBlocker(keeper))
-	mApp.SetInitChainer(getInitChainer(mApp, keeper, sk, mApp.AccountKeeper, genState))
+	mApp.SetInitChainer(getInitChainer(mApp, keeper, sk, supplyKeeper, genAccs, genState,
+		[]supplyexported.ModuleAccountI{govAcc, notBondedPool, bondPool}))
 
-	require.NoError(t, mApp.CompleteSetup(keyStaking, tKeyStaking, keyGov))
-
-	valTokens := sdk.TokensFromTendermintPower(42)
+	require.NoError(t, mApp.CompleteSetup(keyStaking, keyGov, keySupply))
 
 	var (
 		addrs    []sdk.AccAddress
@@ -64,8 +105,7 @@ func getMockApp(t *testing.T, numGenAccs int, genState GenesisState, genAccs []a
 	)
 
 	if genAccs == nil || len(genAccs) == 0 {
-		genAccs, addrs, pubKeys, privKeys = mock.CreateGenAccounts(numGenAccs,
-			sdk.Coins{sdk.NewCoin(sdk.DefaultBondDenom, valTokens)})
+		genAccs, addrs, pubKeys, privKeys = mock.CreateGenAccounts(numGenAccs, valCoins)
 	}
 
 	mock.SetGenesis(mApp, genAccs)
@@ -76,29 +116,32 @@ func getMockApp(t *testing.T, numGenAccs int, genState GenesisState, genAccs []a
 // gov and staking endblocker
 func getEndBlocker(keeper Keeper) sdk.EndBlocker {
 	return func(ctx sdk.Context, req abci.RequestEndBlock) abci.ResponseEndBlock {
-		tags := EndBlocker(ctx, keeper)
-		return abci.ResponseEndBlock{
-			Tags: tags,
-		}
+		EndBlocker(ctx, keeper)
+		return abci.ResponseEndBlock{}
 	}
 }
 
 // gov and staking initchainer
-func getInitChainer(mapp *mock.App, keeper Keeper, stakingKeeper staking.Keeper,
-	accountKeeper staking.AccountKeeper, genState GenesisState) sdk.InitChainer {
-
+func getInitChainer(mapp *mock.App, keeper Keeper, stakingKeeper staking.Keeper, supplyKeeper supply.Keeper, accs []authexported.Account, genState GenesisState,
+	blacklistedAddrs []supplyexported.ModuleAccountI) sdk.InitChainer {
 	return func(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
 		mapp.InitChainer(ctx, req)
 
 		stakingGenesis := staking.DefaultGenesisState()
-		tokens := sdk.TokensFromTendermintPower(100000)
-		stakingGenesis.Pool.NotBondedTokens = tokens
 
-		validators := staking.InitGenesis(ctx, stakingKeeper, accountKeeper, stakingGenesis)
+		totalSupply := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, initTokens.MulRaw(int64(len(mapp.GenesisAccounts)))))
+		supplyKeeper.SetSupply(ctx, supply.NewSupply(totalSupply))
+
+		// set module accounts
+		for _, macc := range blacklistedAddrs {
+			supplyKeeper.SetModuleAccount(ctx, macc)
+		}
+
+		validators := staking.InitGenesis(ctx, stakingKeeper, mapp.AccountKeeper, supplyKeeper, stakingGenesis)
 		if genState.IsEmpty() {
-			InitGenesis(ctx, keeper, DefaultGenesisState())
+			InitGenesis(ctx, keeper, supplyKeeper, types.DefaultGenesisState())
 		} else {
-			InitGenesis(ctx, keeper, genState)
+			InitGenesis(ctx, keeper, supplyKeeper, genState)
 		}
 		return abci.ResponseInitChain{
 			Validators: validators,
@@ -106,7 +149,7 @@ func getInitChainer(mapp *mock.App, keeper Keeper, stakingKeeper staking.Keeper,
 	}
 }
 
-// Sorts Addresses
+// SortAddresses - Sorts Addresses
 func SortAddresses(addrs []sdk.AccAddress) {
 	var byteAddrs [][]byte
 	for _, addr := range addrs {
@@ -142,21 +185,32 @@ func (b sortByteArrays) Swap(i, j int) {
 	b[j], b[i] = b[i], b[j]
 }
 
-// Public
+// SortByteArrays - sorts the provided byte array
 func SortByteArrays(src [][]byte) [][]byte {
 	sorted := sortByteArrays(src)
 	sort.Sort(sorted)
 	return sorted
 }
 
-func testProposal() Content {
-	return NewTextProposal("Test", "description")
-}
+const contextKeyBadProposal = "contextKeyBadProposal"
 
-// checks if two proposals are equal (note: slow, for tests only)
-func ProposalEqual(proposalA Proposal, proposalB Proposal) bool {
-	return bytes.Equal(types.ModuleCdc.MustMarshalBinaryBare(proposalA),
-		types.ModuleCdc.MustMarshalBinaryBare(proposalB))
+// badProposalHandler implements a governance proposal handler that is identical
+// to the actual handler except this fails if the context doesn't contain a value
+// for the key contextKeyBadProposal or if the value is false.
+func badProposalHandler(ctx sdk.Context, c types.Content) error {
+	switch c.ProposalType() {
+	case types.ProposalTypeText:
+		v := ctx.Value(contextKeyBadProposal)
+
+		if v == nil || !v.(bool) {
+			return errors.New("proposal failed")
+		}
+
+		return nil
+
+	default:
+		return sdkerrors.Wrapf(sdkerrors.ErrUnknownRequest, "unrecognized gov proposal type: %s", c.ProposalType())
+	}
 }
 
 var (
@@ -165,9 +219,6 @@ var (
 		ed25519.GenPrivKey().PubKey(),
 		ed25519.GenPrivKey().PubKey(),
 	}
-
-	testDescription   = staking.NewDescription("T", "E", "S", "T")
-	testCommissionMsg = staking.NewCommissionMsg(sdk.ZeroDec(), sdk.ZeroDec(), sdk.ZeroDec())
 )
 
 func createValidators(t *testing.T, stakingHandler sdk.Handler, ctx sdk.Context, addrs []sdk.ValAddress, powerAmt []int64) {
@@ -175,13 +226,14 @@ func createValidators(t *testing.T, stakingHandler sdk.Handler, ctx sdk.Context,
 
 	for i := 0; i < len(addrs); i++ {
 
-		valTokens := sdk.TokensFromTendermintPower(powerAmt[i])
+		valTokens := sdk.TokensFromConsensusPower(powerAmt[i])
 		valCreateMsg := staking.NewMsgCreateValidator(
 			addrs[i], pubkeys[i], sdk.NewCoin(sdk.DefaultBondDenom, valTokens),
-			testDescription, testCommissionMsg, sdk.OneInt(),
+			keep.TestDescription, keep.TestCommissionRates, sdk.OneInt(),
 		)
 
-		res := stakingHandler(ctx, valCreateMsg)
-		require.True(t, res.IsOK())
+		res, err := stakingHandler(ctx, valCreateMsg)
+		require.NoError(t, err)
+		require.NotNil(t, res)
 	}
 }

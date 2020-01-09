@@ -16,6 +16,14 @@ func TestFromInt64(t *testing.T) {
 	}
 }
 
+func TestFromUint64(t *testing.T) {
+	for n := 0; n < 20; n++ {
+		r := rand.Uint64()
+		require.True(t, NewIntFromUint64(r).IsUint64())
+		require.Equal(t, r, NewIntFromUint64(r).Uint64())
+	}
+}
+
 func TestIntPanic(t *testing.T) {
 	// Max Int = 2^255-1 = 5.789e+76
 	// Min Int = -(2^255-1) = -5.789e+76
@@ -332,17 +340,17 @@ func TestEncodingTableInt(t *testing.T) {
 	for tcnum, tc := range cases {
 		bz, err := tc.i.MarshalJSON()
 		require.Nil(t, err, "Error marshaling Int. tc #%d, err %s", tcnum, err)
-		require.Equal(t, tc.bz, bz, "Marshaled value is different from expected. tc #%d", tcnum)
+		require.Equal(t, tc.bz, bz, "Marshaled value is different from exported. tc #%d", tcnum)
 		err = (&i).UnmarshalJSON(bz)
 		require.Nil(t, err, "Error unmarshaling Int. tc #%d, err %s", tcnum, err)
-		require.Equal(t, tc.i, i, "Unmarshaled value is different from expected. tc #%d", tcnum)
+		require.Equal(t, tc.i, i, "Unmarshaled value is different from exported. tc #%d", tcnum)
 
 		str, err := tc.i.MarshalAmino()
 		require.Nil(t, err, "Error marshaling Int. tc #%d, err %s", tcnum, err)
-		require.Equal(t, tc.str, str, "Marshaled value is different from expected. tc #%d", tcnum)
+		require.Equal(t, tc.str, str, "Marshaled value is different from exported. tc #%d", tcnum)
 		err = (&i).UnmarshalAmino(str)
 		require.Nil(t, err, "Error unmarshaling Int. tc #%d, err %s", tcnum, err)
-		require.Equal(t, tc.i, i, "Unmarshaled value is different from expected. tc #%d", tcnum)
+		require.Equal(t, tc.i, i, "Unmarshaled value is different from exported. tc #%d", tcnum)
 	}
 }
 
@@ -364,17 +372,17 @@ func TestEncodingTableUint(t *testing.T) {
 	for tcnum, tc := range cases {
 		bz, err := tc.i.MarshalJSON()
 		require.Nil(t, err, "Error marshaling Int. tc #%d, err %s", tcnum, err)
-		require.Equal(t, tc.bz, bz, "Marshaled value is different from expected. tc #%d", tcnum)
+		require.Equal(t, tc.bz, bz, "Marshaled value is different from exported. tc #%d", tcnum)
 		err = (&i).UnmarshalJSON(bz)
 		require.Nil(t, err, "Error unmarshaling Int. tc #%d, err %s", tcnum, err)
-		require.Equal(t, tc.i, i, "Unmarshaled value is different from expected. tc #%d", tcnum)
+		require.Equal(t, tc.i, i, "Unmarshaled value is different from exported. tc #%d", tcnum)
 
 		str, err := tc.i.MarshalAmino()
 		require.Nil(t, err, "Error marshaling Int. tc #%d, err %s", tcnum, err)
-		require.Equal(t, tc.str, str, "Marshaled value is different from expected. tc #%d", tcnum)
+		require.Equal(t, tc.str, str, "Marshaled value is different from exported. tc #%d", tcnum)
 		err = (&i).UnmarshalAmino(str)
 		require.Nil(t, err, "Error unmarshaling Int. tc #%d, err %s", tcnum, err)
-		require.Equal(t, tc.i, i, "Unmarshaled value is different from expected. tc #%d", tcnum)
+		require.Equal(t, tc.i, i, "Unmarshaled value is different from exported. tc #%d", tcnum)
 	}
 }
 

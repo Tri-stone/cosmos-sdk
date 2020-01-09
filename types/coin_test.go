@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/cosmos/cosmos-sdk/codec"
 )
 
 var (
@@ -38,12 +40,33 @@ func TestIsEqualCoin(t *testing.T) {
 	}
 
 	for tcIndex, tc := range cases {
+		tc := tc
 		if tc.panics {
 			require.Panics(t, func() { tc.inputOne.IsEqual(tc.inputTwo) })
 		} else {
 			res := tc.inputOne.IsEqual(tc.inputTwo)
 			require.Equal(t, tc.expected, res, "coin equality relation is incorrect, tc #%d", tcIndex)
 		}
+	}
+}
+
+func TestCoinIsValid(t *testing.T) {
+	cases := []struct {
+		coin       Coin
+		expectPass bool
+	}{
+		{Coin{testDenom1, NewInt(-1)}, false},
+		{Coin{testDenom1, NewInt(0)}, true},
+		{Coin{testDenom1, NewInt(1)}, true},
+		{Coin{"Atom", NewInt(1)}, false},
+		{Coin{"a", NewInt(1)}, false},
+		{Coin{"a very long coin denom", NewInt(1)}, false},
+		{Coin{"atOm", NewInt(1)}, false},
+		{Coin{"     ", NewInt(1)}, false},
+	}
+
+	for i, tc := range cases {
+		require.Equal(t, tc.expectPass, tc.coin.IsValid(), "unexpected result for IsValid, tc #%d", i)
 	}
 }
 
@@ -60,6 +83,7 @@ func TestAddCoin(t *testing.T) {
 	}
 
 	for tcIndex, tc := range cases {
+		tc := tc
 		if tc.shouldPanic {
 			require.Panics(t, func() { tc.inputOne.Add(tc.inputTwo) })
 		} else {
@@ -84,6 +108,7 @@ func TestSubCoin(t *testing.T) {
 	}
 
 	for tcIndex, tc := range cases {
+		tc := tc
 		if tc.shouldPanic {
 			require.Panics(t, func() { tc.inputOne.Sub(tc.inputTwo) })
 		} else {
@@ -114,6 +139,7 @@ func TestIsGTECoin(t *testing.T) {
 	}
 
 	for tcIndex, tc := range cases {
+		tc := tc
 		if tc.panics {
 			require.Panics(t, func() { tc.inputOne.IsGTE(tc.inputTwo) })
 		} else {
@@ -139,6 +165,7 @@ func TestIsLTCoin(t *testing.T) {
 	}
 
 	for tcIndex, tc := range cases {
+		tc := tc
 		if tc.panics {
 			require.Panics(t, func() { tc.inputOne.IsLT(tc.inputTwo) })
 		} else {
@@ -196,11 +223,12 @@ func TestEqualCoins(t *testing.T) {
 	}
 
 	for tcnum, tc := range cases {
+		tc := tc
 		if tc.panics {
 			require.Panics(t, func() { tc.inputOne.IsEqual(tc.inputTwo) })
 		} else {
 			res := tc.inputOne.IsEqual(tc.inputTwo)
-			require.Equal(t, tc.expected, res, "Equality is differed from expected. tc #%d, expected %b, actual %b.", tcnum, tc.expected, res)
+			require.Equal(t, tc.expected, res, "Equality is differed from exported. tc #%d, expected %b, actual %b.", tcnum, tc.expected, res)
 		}
 	}
 }
@@ -223,7 +251,7 @@ func TestAddCoins(t *testing.T) {
 	}
 
 	for tcIndex, tc := range cases {
-		res := tc.inputOne.Add(tc.inputTwo)
+		res := tc.inputOne.Add(tc.inputTwo...)
 		assert.True(t, res.IsValid())
 		require.Equal(t, tc.expected, res, "sum of coins is incorrect, tc #%d", tcIndex)
 	}
@@ -248,6 +276,7 @@ func TestSubCoins(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
+		tc := tc
 		if tc.shouldPanic {
 			require.Panics(t, func() { tc.inputOne.Sub(tc.inputTwo) })
 		} else {
@@ -564,6 +593,7 @@ func TestNewCoins(t *testing.T) {
 		{"panic on dups", []Coin{tenatom, tenatom}, Coins{}, true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.wantPanic {
 				require.Panics(t, func() { NewCoins(tt.coins...) })
@@ -614,9 +644,43 @@ func TestFindDup(t *testing.T) {
 		{"dup after first position", args{Coins{abc, def, def}}, 2},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			if got := findDup(tt.args.coins); got != tt.want {
 				t.Errorf("findDup() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMarshalJSONCoins(t *testing.T) {
+	cdc := codec.New()
+	RegisterCodec(cdc)
+
+	testCases := []struct {
+		name      string
+		input     Coins
+		strOutput string
+	}{
+		{"nil coins", nil, `[]`},
+		{"empty coins", Coins{}, `[]`},
+		{"non-empty coins", NewCoins(NewInt64Coin("foo", 50)), `[{"denom":"foo","amount":"50"}]`},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			bz, err := cdc.MarshalJSON(tc.input)
+			require.NoError(t, err)
+			require.Equal(t, tc.strOutput, string(bz))
+
+			var newCoins Coins
+			require.NoError(t, cdc.UnmarshalJSON(bz, &newCoins))
+
+			if tc.input.Empty() {
+				require.Nil(t, newCoins)
+			} else {
+				require.Equal(t, tc.input, newCoins)
 			}
 		})
 	}

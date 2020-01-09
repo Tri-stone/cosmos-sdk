@@ -4,22 +4,22 @@ import (
 	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/x/distribution/types"
 )
 
-func HandleCommunityPoolSpendProposal(ctx sdk.Context, k Keeper, p types.CommunityPoolSpendProposal) sdk.Error {
-	feePool := k.GetFeePool(ctx)
-	newPool, negative := feePool.CommunityPool.SafeSub(sdk.NewDecCoins(p.Amount))
-	if negative {
-		return types.ErrBadDistribution(k.codespace)
+// HandleCommunityPoolSpendProposal is a handler for executing a passed community spend proposal
+func HandleCommunityPoolSpendProposal(ctx sdk.Context, k Keeper, p types.CommunityPoolSpendProposal) error {
+	if k.blacklistedAddrs[p.Recipient.String()] {
+		return sdkerrors.Wrapf(sdkerrors.ErrUnauthorized, "%s is blacklisted from receiving external funds", p.Recipient)
 	}
-	feePool.CommunityPool = newPool
-	k.SetFeePool(ctx, feePool)
-	_, err := k.bankKeeper.AddCoins(ctx, p.Recipient, p.Amount)
+
+	err := k.DistributeFromFeePool(ctx, p.Amount, p.Recipient)
 	if err != nil {
 		return err
 	}
+
 	logger := k.Logger(ctx)
-	logger.Info(fmt.Sprintf("Spent %s coins from the community pool to recipient %s", p.Amount, p.Recipient))
+	logger.Info(fmt.Sprintf("transferred %s from the community pool to recipient %s", p.Amount, p.Recipient))
 	return nil
 }

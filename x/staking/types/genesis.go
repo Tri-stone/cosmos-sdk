@@ -6,36 +6,34 @@ import (
 
 // GenesisState - all staking state that must be provided at genesis
 type GenesisState struct {
-	Pool                 Pool                  `json:"pool"`
-	Params               Params                `json:"params"`
-	LastTotalPower       sdk.Int               `json:"last_total_power"`
-	LastValidatorPowers  []LastValidatorPower  `json:"last_validator_powers"`
-	Validators           Validators            `json:"validators"`
-	Delegations          Delegations           `json:"delegations"`
-	UnbondingDelegations []UnbondingDelegation `json:"unbonding_delegations"`
-	Redelegations        []Redelegation        `json:"redelegations"`
-	Exported             bool                  `json:"exported"`
+	Params               Params                `json:"params" yaml:"params"`
+	LastTotalPower       sdk.Int               `json:"last_total_power" yaml:"last_total_power"`
+	LastValidatorPowers  []LastValidatorPower  `json:"last_validator_powers" yaml:"last_validator_powers"`
+	Validators           Validators            `json:"validators" yaml:"validators"`
+	Delegations          Delegations           `json:"delegations" yaml:"delegations"`
+	UnbondingDelegations []UnbondingDelegation `json:"unbonding_delegations" yaml:"unbonding_delegations"`
+	Redelegations        []Redelegation        `json:"redelegations" yaml:"redelegations"`
+	Exported             bool                  `json:"exported" yaml:"exported"`
 }
 
-// Last validator power, needed for validator set update logic
+// LastValidatorPower required for validator set update logic
 type LastValidatorPower struct {
 	Address sdk.ValAddress
 	Power   int64
 }
 
-func NewGenesisState(pool Pool, params Params, validators []Validator, delegations []Delegation) GenesisState {
+// NewGenesisState creates a new GenesisState instanc e
+func NewGenesisState(params Params, validators []Validator, delegations []Delegation) GenesisState {
 	return GenesisState{
-		Pool:        pool,
 		Params:      params,
 		Validators:  validators,
 		Delegations: delegations,
 	}
 }
 
-// get raw genesis raw message for testing
+// DefaultGenesisState gets the raw genesis raw message for testing
 func DefaultGenesisState() GenesisState {
 	return GenesisState{
-		Pool:   InitialPool(),
 		Params: DefaultParams(),
 	}
 }

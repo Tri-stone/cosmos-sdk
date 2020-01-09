@@ -1,38 +1,37 @@
 package params
 
 import (
+	"fmt"
+
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/params/subspace"
+	"github.com/cosmos/cosmos-sdk/x/params/types"
 
 	"github.com/tendermint/tendermint/libs/log"
 )
 
 // Keeper of the global paramstore
 type Keeper struct {
-	cdc       *codec.Codec
-	key       sdk.StoreKey
-	tkey      sdk.StoreKey
-	codespace sdk.CodespaceType
-	spaces    map[string]*Subspace
+	cdc    *codec.Codec
+	key    sdk.StoreKey
+	tkey   sdk.StoreKey
+	spaces map[string]*Subspace
 }
 
 // NewKeeper constructs a params keeper
-func NewKeeper(cdc *codec.Codec, key *sdk.KVStoreKey, tkey *sdk.TransientStoreKey, codespace sdk.CodespaceType) (k Keeper) {
-	k = Keeper{
-		cdc:       cdc,
-		key:       key,
-		tkey:      tkey,
-		codespace: codespace,
-		spaces:    make(map[string]*Subspace),
+func NewKeeper(cdc *codec.Codec, key, tkey sdk.StoreKey) Keeper {
+	return Keeper{
+		cdc:    cdc,
+		key:    key,
+		tkey:   tkey,
+		spaces: make(map[string]*Subspace),
 	}
-
-	return k
 }
 
 // Logger returns a module-specific logger.
 func (k Keeper) Logger(ctx sdk.Context) log.Logger {
-	return ctx.Logger().With("module", "x/params")
+	return ctx.Logger().With("module", fmt.Sprintf("x/%s", types.ModuleName))
 }
 
 // Allocate subspace used for keepers

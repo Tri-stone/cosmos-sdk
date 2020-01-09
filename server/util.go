@@ -21,7 +21,7 @@ import (
 	"github.com/tendermint/tendermint/libs/log"
 	pvm "github.com/tendermint/tendermint/privval"
 
-	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/server/config"
 	"github.com/cosmos/cosmos-sdk/version"
@@ -55,10 +55,6 @@ func PersistentPreRunEFn(context *Context) func(*cobra.Command, []string) error 
 			return nil
 		}
 		config, err := interceptLoadConfig()
-		if err != nil {
-			return err
-		}
-		err = validateConfig(config)
 		if err != nil {
 			return err
 		}
@@ -103,6 +99,9 @@ func interceptLoadConfig() (conf *cfg.Config, err error) {
 
 	if conf == nil {
 		conf, err = tcmd.ParseConfig() // NOTE: ParseConfig() creates dir/files as necessary.
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	appConfigFilePath := filepath.Join(rootDir, "config/app.toml")
@@ -114,15 +113,7 @@ func interceptLoadConfig() (conf *cfg.Config, err error) {
 	viper.SetConfigName("app")
 	err = viper.MergeInConfig()
 
-	return
-}
-
-// validate the config with the sdk's requirements.
-func validateConfig(conf *cfg.Config) error {
-	if !conf.Consensus.CreateEmptyBlocks {
-		return errors.New("config option CreateEmptyBlocks = false is currently unsupported")
-	}
-	return nil
+	return conf, err
 }
 
 // add server commands
@@ -148,10 +139,10 @@ func AddCommands(
 	rootCmd.AddCommand(
 		StartCmd(ctx, appCreator),
 		UnsafeResetAllCmd(ctx),
-		client.LineBreak,
+		flags.LineBreak,
 		tendermintCmd,
 		ExportCmd(ctx, cdc, appExport),
-		client.LineBreak,
+		flags.LineBreak,
 		version.Cmd,
 	)
 }
@@ -256,3 +247,5 @@ func addrToIP(addr net.Addr) net.IP {
 	}
 	return ip
 }
+
+// DONTCOVER

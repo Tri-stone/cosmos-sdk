@@ -23,10 +23,10 @@ func init() {
 
 // CommunityPoolSpendProposal spends from the community pool
 type CommunityPoolSpendProposal struct {
-	Title       string         `json:"title"`
-	Description string         `json:"description"`
-	Recipient   sdk.AccAddress `json:"recipient"`
-	Amount      sdk.Coins      `json:"amount"`
+	Title       string         `json:"title" yaml:"title"`
+	Description string         `json:"description" yaml:"description"`
+	Recipient   sdk.AccAddress `json:"recipient" yaml:"recipient"`
+	Amount      sdk.Coins      `json:"amount" yaml:"amount"`
 }
 
 // NewCommunityPoolSpendProposal creates a new community pool spned proposal.
@@ -47,17 +47,18 @@ func (csp CommunityPoolSpendProposal) ProposalRoute() string { return RouterKey 
 func (csp CommunityPoolSpendProposal) ProposalType() string { return ProposalTypeCommunityPoolSpend }
 
 // ValidateBasic runs basic stateless validity checks
-func (csp CommunityPoolSpendProposal) ValidateBasic() sdk.Error {
-	err := govtypes.ValidateAbstract(DefaultCodespace, csp)
+func (csp CommunityPoolSpendProposal) ValidateBasic() error {
+	err := govtypes.ValidateAbstract(csp)
 	if err != nil {
 		return err
 	}
 	if !csp.Amount.IsValid() {
-		return ErrInvalidProposalAmount(DefaultCodespace)
+		return ErrInvalidProposalAmount
 	}
 	if csp.Recipient.Empty() {
-		return ErrEmptyProposalRecipient(DefaultCodespace)
+		return ErrEmptyProposalRecipient
 	}
+
 	return nil
 }
 

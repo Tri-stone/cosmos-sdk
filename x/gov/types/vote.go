@@ -9,9 +9,14 @@ import (
 
 // Vote
 type Vote struct {
-	Voter      sdk.AccAddress `json:"voter"`       //  address of the voter
-	ProposalID uint64         `json:"proposal_id"` //  proposalID of the proposal
-	Option     VoteOption     `json:"option"`      //  option from OptionSet chosen by the voter
+	ProposalID uint64         `json:"proposal_id" yaml:"proposal_id"` //  proposalID of the proposal
+	Voter      sdk.AccAddress `json:"voter" yaml:"voter"`             //  address of the voter
+	Option     VoteOption     `json:"option" yaml:"option"`           //  option from OptionSet chosen by the voter
+}
+
+// NewVote creates a new Vote instance
+func NewVote(proposalID uint64, voter sdk.AccAddress, option VoteOption) Vote {
+	return Vote{proposalID, voter, option}
 }
 
 func (v Vote) String() string {
@@ -22,6 +27,9 @@ func (v Vote) String() string {
 type Votes []Vote
 
 func (v Votes) String() string {
+	if len(v) == 0 {
+		return "[]"
+	}
 	out := fmt.Sprintf("Votes for Proposal %d:", v[0].ProposalID)
 	for _, vot := range v {
 		out += fmt.Sprintf("\n  %s: %s", vot.Voter, vot.Option)
@@ -135,7 +143,6 @@ func (vo VoteOption) String() string {
 }
 
 // Format implements the fmt.Formatter interface.
-// nolint: errcheck
 func (vo VoteOption) Format(s fmt.State, verb rune) {
 	switch verb {
 	case 's':

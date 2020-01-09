@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 )
 
@@ -24,9 +23,9 @@ func init() {
 // ParameterChangeProposal defines a proposal which contains multiple parameter
 // changes.
 type ParameterChangeProposal struct {
-	Title       string        `json:"title"`
-	Description string        `json:"description"`
-	Changes     []ParamChange `json:"changes"`
+	Title       string        `json:"title" yaml:"title"`
+	Description string        `json:"description" yaml:"description"`
+	Changes     []ParamChange `json:"changes" yaml:"changes"`
 }
 
 func NewParameterChangeProposal(title, description string, changes []ParamChange) ParameterChangeProposal {
@@ -39,15 +38,15 @@ func (pcp ParameterChangeProposal) GetTitle() string { return pcp.Title }
 // GetDescription returns the description of a parameter change proposal.
 func (pcp ParameterChangeProposal) GetDescription() string { return pcp.Description }
 
-// GetDescription returns the routing key of a parameter change proposal.
+// ProposalRoute returns the routing key of a parameter change proposal.
 func (pcp ParameterChangeProposal) ProposalRoute() string { return RouterKey }
 
 // ProposalType returns the type of a parameter change proposal.
 func (pcp ParameterChangeProposal) ProposalType() string { return ProposalTypeChange }
 
 // ValidateBasic validates the parameter change proposal
-func (pcp ParameterChangeProposal) ValidateBasic() sdk.Error {
-	err := govtypes.ValidateAbstract(DefaultCodespace, pcp)
+func (pcp ParameterChangeProposal) ValidateBasic() error {
+	err := govtypes.ValidateAbstract(pcp)
 	if err != nil {
 		return err
 	}
@@ -69,9 +68,8 @@ func (pcp ParameterChangeProposal) String() string {
 		b.WriteString(fmt.Sprintf(`    Param Change:
       Subspace: %s
       Key:      %s
-      Subkey:   %X
       Value:    %X
-`, pc.Subspace, pc.Key, pc.Subkey, pc.Value))
+`, pc.Subspace, pc.Key, pc.Value))
 	}
 
 	return b.String()
@@ -79,14 +77,13 @@ func (pcp ParameterChangeProposal) String() string {
 
 // ParamChange defines a parameter change.
 type ParamChange struct {
-	Subspace string `json:"subspace"`
-	Key      string `json:"key"`
-	Subkey   string `json:"subkey,omitempty"`
-	Value    string `json:"value"`
+	Subspace string `json:"subspace" yaml:"subspace"`
+	Key      string `json:"key" yaml:"key"`
+	Value    string `json:"value" yaml:"value"`
 }
 
-func NewParamChange(subspace, key, subkey, value string) ParamChange {
-	return ParamChange{subspace, key, subkey, value}
+func NewParamChange(subspace, key, value string) ParamChange {
+	return ParamChange{subspace, key, value}
 }
 
 // String implements the Stringer interface.
@@ -94,27 +91,26 @@ func (pc ParamChange) String() string {
 	return fmt.Sprintf(`Param Change:
   Subspace: %s
   Key:      %s
-  Subkey:   %X
   Value:    %X
-`, pc.Subspace, pc.Key, pc.Subkey, pc.Value)
+`, pc.Subspace, pc.Key, pc.Value)
 }
 
-// ValidateChange performs basic validation checks over a set of ParamChange. It
+// ValidateChanges performs basic validation checks over a set of ParamChange. It
 // returns an error if any ParamChange is invalid.
-func ValidateChanges(changes []ParamChange) sdk.Error {
+func ValidateChanges(changes []ParamChange) error {
 	if len(changes) == 0 {
-		return ErrEmptyChanges(DefaultCodespace)
+		return ErrEmptyChanges
 	}
 
 	for _, pc := range changes {
 		if len(pc.Subspace) == 0 {
-			return ErrEmptySubspace(DefaultCodespace)
+			return ErrEmptySubspace
 		}
 		if len(pc.Key) == 0 {
-			return ErrEmptyKey(DefaultCodespace)
+			return ErrEmptyKey
 		}
 		if len(pc.Value) == 0 {
-			return ErrEmptyValue(DefaultCodespace)
+			return ErrEmptyValue
 		}
 	}
 

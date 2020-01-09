@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	cfg "github.com/tendermint/tendermint/config"
@@ -13,10 +14,11 @@ import (
 	"github.com/tendermint/tendermint/libs/common"
 	"github.com/tendermint/tendermint/types"
 
-	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/server"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 )
 
@@ -26,11 +28,11 @@ const (
 )
 
 type printInfo struct {
-	Moniker    string          `json:"moniker"`
-	ChainID    string          `json:"chain_id"`
-	NodeID     string          `json:"node_id"`
-	GenTxsDir  string          `json:"gentxs_dir"`
-	AppMessage json.RawMessage `json:"app_message"`
+	Moniker    string          `json:"moniker" yaml:"moniker"`
+	ChainID    string          `json:"chain_id" yaml:"chain_id"`
+	NodeID     string          `json:"node_id" yaml:"node_id"`
+	GenTxsDir  string          `json:"gentxs_dir" yaml:"gentxs_dir"`
+	AppMessage json.RawMessage `json:"app_message" yaml:"app_message"`
 }
 
 func newPrintInfo(moniker, chainID, nodeID, genTxsDir string,
@@ -51,13 +53,13 @@ func displayInfo(cdc *codec.Codec, info printInfo) error {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "%s\n", string(out)) // nolint: errcheck
-	return nil
+	_, err = fmt.Fprintf(os.Stderr, "%s\n", string(sdk.MustSortJSON(out)))
+	return err
 }
 
 // InitCmd returns a command that initializes all files needed for Tendermint
 // and the respective application.
-func InitCmd(ctx *server.Context, cdc *codec.Codec, mbm sdk.ModuleBasicManager,
+func InitCmd(ctx *server.Context, cdc *codec.Codec, mbm module.BasicManager,
 	defaultNodeHome string) *cobra.Command { // nolint: golint
 	cmd := &cobra.Command{
 		Use:   "init [moniker]",
@@ -68,7 +70,7 @@ func InitCmd(ctx *server.Context, cdc *codec.Codec, mbm sdk.ModuleBasicManager,
 			config := ctx.Config
 			config.SetRoot(viper.GetString(cli.HomeFlag))
 
-			chainID := viper.GetString(client.FlagChainID)
+			chainID := viper.GetString(flags.FlagChainID)
 			if chainID == "" {
 				chainID = fmt.Sprintf("test-chain-%v", common.RandStr(6))
 			}
@@ -86,7 +88,7 @@ func InitCmd(ctx *server.Context, cdc *codec.Codec, mbm sdk.ModuleBasicManager,
 			}
 			appState, err := codec.MarshalJSONIndent(cdc, mbm.DefaultGenesis())
 			if err != nil {
-				return err
+				return errors.Wrap(err, "Failed to marshall default genesis state")
 			}
 
 			genDoc := &types.GenesisDoc{}
@@ -97,7 +99,7 @@ func InitCmd(ctx *server.Context, cdc *codec.Codec, mbm sdk.ModuleBasicManager,
 			} else {
 				genDoc, err = types.GenesisDocFromFile(genFile)
 				if err != nil {
-					return err
+					return errors.Wrap(err, "Failed to read genesis doc from file")
 				}
 			}
 
@@ -105,7 +107,7 @@ func InitCmd(ctx *server.Context, cdc *codec.Codec, mbm sdk.ModuleBasicManager,
 			genDoc.Validators = nil
 			genDoc.AppState = appState
 			if err = genutil.ExportGenesisFile(genDoc, genFile); err != nil {
-				return err
+				return errors.Wrap(err, "Failed to export gensis file")
 			}
 
 			toPrint := newPrintInfo(config.Moniker, chainID, nodeID, "", appState)
@@ -117,7 +119,7 @@ func InitCmd(ctx *server.Context, cdc *codec.Codec, mbm sdk.ModuleBasicManager,
 
 	cmd.Flags().String(cli.HomeFlag, defaultNodeHome, "node's home directory")
 	cmd.Flags().BoolP(flagOverwrite, "o", false, "overwrite the genesis.json file")
-	cmd.Flags().String(client.FlagChainID, "", "genesis file chain-id, if left blank will be randomly created")
+	cmd.Flags().String(flags.FlagChainID, "", "genesis file chain-id, if left blank will be randomly created")
 
 	return cmd
 }

@@ -1,160 +1,130 @@
 package context
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
+	yaml "gopkg.in/yaml.v2"
 
-	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/tendermint/tendermint/libs/cli"
+	tmlite "github.com/tendermint/tendermint/lite"
+	rpcclient "github.com/tendermint/tendermint/rpc/client"
+
+	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/client/keys"
 	"github.com/cosmos/cosmos-sdk/codec"
 	cryptokeys "github.com/cosmos/cosmos-sdk/crypto/keys"
-	"github.com/cosmos/cosmos-sdk/x/auth"
-
-	"github.com/spf13/viper"
-
-	"github.com/tendermint/tendermint/libs/cli"
-	"github.com/tendermint/tendermint/libs/log"
-	tmlite "github.com/tendermint/tendermint/lite"
-	tmliteProxy "github.com/tendermint/tendermint/lite/proxy"
-	rpcclient "github.com/tendermint/tendermint/rpc/client"
-
 	sdk "github.com/cosmos/cosmos-sdk/types"
-)
-
-var (
-	verifier     tmlite.Verifier
-	verifierHome string
 )
 
 // CLIContext implements a typical CLI context created in SDK modules for
 // transaction handling and queries.
 type CLIContext struct {
-	Codec         *codec.Codec
-	AccDecoder    auth.AccountDecoder
+	FromAddress   sdk.AccAddress
 	Client        rpcclient.Client
+	ChainID       string
 	Keybase       cryptokeys.Keybase
+	Input         io.Reader
 	Output        io.Writer
 	OutputFormat  string
 	Height        int64
+	HomeDir       string
 	NodeURI       string
 	From          string
-	AccountStore  string
+	BroadcastMode string
+	Verifier      tmlite.Verifier
+	FromName      string
+	Codec         *codec.Codec
 	TrustNode     bool
 	UseLedger     bool
-	BroadcastMode string
-	PrintResponse bool
-	Verifier      tmlite.Verifier
-	VerifierHome  string
 	Simulate      bool
 	GenerateOnly  bool
-	FromAddress   sdk.AccAddress
-	FromName      string
 	Indent        bool
 	SkipConfirm   bool
 }
 
-// NewCLIContextWithFrom returns a new initialized CLIContext with parameters from the
-// command line using Viper. It takes a key name or address and populates the FromName and
-// FromAddress field accordingly.
-func NewCLIContextWithFrom(from string) CLIContext {
+// NewCLIContextWithInputAndFrom returns a new initialized CLIContext with parameters from the
+// command line using Viper. It takes a io.Reader and and key name or address and populates
+// the FromName and  FromAddress field accordingly. It will also create Tendermint verifier
+// using  the chain ID, home directory and RPC URI provided by the command line. If using
+// a CLIContext in tests or any non CLI-based environment, the verifier will not be created
+// and will be set as nil because FlagTrustNode must be set.
+func NewCLIContextWithInputAndFrom(input io.Reader, from string) CLIContext {
 	var nodeURI string
 	var rpc rpcclient.Client
 
-	genOnly := viper.GetBool(client.FlagGenerateOnly)
-	fromAddress, fromName, err := GetFromFields(from, genOnly)
+	genOnly := viper.GetBool(flags.FlagGenerateOnly)
+	fromAddress, fromName, err := GetFromFields(input, from, genOnly)
 	if err != nil {
 		fmt.Printf("failed to get from fields: %v", err)
 		os.Exit(1)
 	}
 
 	if !genOnly {
-		nodeURI = viper.GetString(client.FlagNode)
+		nodeURI = viper.GetString(flags.FlagNode)
 		if nodeURI != "" {
 			rpc = rpcclient.NewHTTP(nodeURI, "/websocket")
 		}
 	}
 
-	// We need to use a single verifier for all contexts
-	if verifier == nil || verifierHome != viper.GetString(cli.HomeFlag) {
-		verifier = createVerifier()
-		verifierHome = viper.GetString(cli.HomeFlag)
-	}
-
-	return CLIContext{
+	ctx := CLIContext{
 		Client:        rpc,
+		ChainID:       viper.GetString(flags.FlagChainID),
+		Input:         input,
 		Output:        os.Stdout,
 		NodeURI:       nodeURI,
-		AccountStore:  auth.StoreKey,
-		From:          viper.GetString(client.FlagFrom),
+		From:          viper.GetString(flags.FlagFrom),
 		OutputFormat:  viper.GetString(cli.OutputFlag),
-		Height:        viper.GetInt64(client.FlagHeight),
-		TrustNode:     viper.GetBool(client.FlagTrustNode),
-		UseLedger:     viper.GetBool(client.FlagUseLedger),
-		BroadcastMode: viper.GetString(client.FlagBroadcastMode),
-		PrintResponse: viper.GetBool(client.FlagPrintResponse),
-		Verifier:      verifier,
-		Simulate:      viper.GetBool(client.FlagDryRun),
+		Height:        viper.GetInt64(flags.FlagHeight),
+		HomeDir:       viper.GetString(flags.FlagHome),
+		TrustNode:     viper.GetBool(flags.FlagTrustNode),
+		UseLedger:     viper.GetBool(flags.FlagUseLedger),
+		BroadcastMode: viper.GetString(flags.FlagBroadcastMode),
+		Simulate:      viper.GetBool(flags.FlagDryRun),
 		GenerateOnly:  genOnly,
 		FromAddress:   fromAddress,
 		FromName:      fromName,
-		Indent:        viper.GetBool(client.FlagIndentResponse),
-		SkipConfirm:   viper.GetBool(client.FlagSkipConfirmation),
+		Indent:        viper.GetBool(flags.FlagIndentResponse),
+		SkipConfirm:   viper.GetBool(flags.FlagSkipConfirmation),
 	}
+
+	// create a verifier for the specific chain ID and RPC client
+	verifier, err := CreateVerifier(ctx, DefaultVerifierCacheSize)
+	if err != nil && viper.IsSet(flags.FlagTrustNode) {
+		fmt.Printf("failed to create verifier: %s\n", err)
+		os.Exit(1)
+	}
+
+	return ctx.WithVerifier(verifier)
+}
+
+// NewCLIContextWithFrom returns a new initialized CLIContext with parameters from the
+// command line using Viper. It takes a key name or address and populates the FromName and
+// FromAddress field accordingly. It will also create Tendermint verifier using
+// the chain ID, home directory and RPC URI provided by the command line. If using
+// a CLIContext in tests or any non CLI-based environment, the verifier will not
+// be created and will be set as nil because FlagTrustNode must be set.
+func NewCLIContextWithFrom(from string) CLIContext {
+	return NewCLIContextWithInputAndFrom(os.Stdin, from)
 }
 
 // NewCLIContext returns a new initialized CLIContext with parameters from the
 // command line using Viper.
-func NewCLIContext() CLIContext { return NewCLIContextWithFrom(viper.GetString(client.FlagFrom)) }
+func NewCLIContext() CLIContext { return NewCLIContextWithFrom(viper.GetString(flags.FlagFrom)) }
 
-func createVerifier() tmlite.Verifier {
-	trustNodeDefined := viper.IsSet(client.FlagTrustNode)
-	if !trustNodeDefined {
-		return nil
-	}
+// NewCLIContextWithInput returns a new initialized CLIContext with a io.Reader and parameters
+// from the command line using Viper.
+func NewCLIContextWithInput(input io.Reader) CLIContext {
+	return NewCLIContextWithInputAndFrom(input, viper.GetString(flags.FlagFrom))
+}
 
-	trustNode := viper.GetBool(client.FlagTrustNode)
-	if trustNode {
-		return nil
-	}
-
-	chainID := viper.GetString(client.FlagChainID)
-	home := viper.GetString(cli.HomeFlag)
-	nodeURI := viper.GetString(client.FlagNode)
-
-	var errMsg bytes.Buffer
-	if chainID == "" {
-		errMsg.WriteString("--chain-id ")
-	}
-	if home == "" {
-		errMsg.WriteString("--home ")
-	}
-	if nodeURI == "" {
-		errMsg.WriteString("--node ")
-	}
-	if errMsg.Len() != 0 {
-		fmt.Printf("Must specify these options: %s when --trust-node is false\n", errMsg.String())
-		os.Exit(1)
-	}
-
-	node := rpcclient.NewHTTP(nodeURI, "/websocket")
-	cacheSize := 10 // TODO: determine appropriate cache size
-	verifier, err := tmliteProxy.NewVerifier(
-		chainID, filepath.Join(home, ".lite_verifier"),
-		node, log.NewNopLogger(), cacheSize,
-	)
-
-	if err != nil {
-		fmt.Printf("Create verifier failed: %s\n", err.Error())
-		fmt.Printf("Please check network connection and verify the address of the node to connect to\n")
-		os.Exit(1)
-	}
-
-	return verifier
+// WithInput returns a copy of the context with an updated input.
+func (ctx CLIContext) WithInput(r io.Reader) CLIContext {
+	ctx.Input = r
+	return ctx
 }
 
 // WithCodec returns a copy of the context with an updated codec.
@@ -163,34 +133,9 @@ func (ctx CLIContext) WithCodec(cdc *codec.Codec) CLIContext {
 	return ctx
 }
 
-// GetAccountDecoder gets the account decoder for auth.DefaultAccount.
-func GetAccountDecoder(cdc *codec.Codec) auth.AccountDecoder {
-	return func(accBytes []byte) (acct auth.Account, err error) {
-		err = cdc.UnmarshalBinaryBare(accBytes, &acct)
-		if err != nil {
-			panic(err)
-		}
-
-		return acct, err
-	}
-}
-
-// WithAccountDecoder returns a copy of the context with an updated account
-// decoder.
-func (ctx CLIContext) WithAccountDecoder(cdc *codec.Codec) CLIContext {
-	ctx.AccDecoder = GetAccountDecoder(cdc)
-	return ctx
-}
-
 // WithOutput returns a copy of the context with an updated output writer (e.g. stdout).
 func (ctx CLIContext) WithOutput(w io.Writer) CLIContext {
 	ctx.Output = w
-	return ctx
-}
-
-// WithAccountStore returns a copy of the context with an updated AccountStore.
-func (ctx CLIContext) WithAccountStore(accountStore string) CLIContext {
-	ctx.AccountStore = accountStore
 	return ctx
 }
 
@@ -213,6 +158,12 @@ func (ctx CLIContext) WithNodeURI(nodeURI string) CLIContext {
 	return ctx
 }
 
+// WithHeight returns a copy of the context with an updated height.
+func (ctx CLIContext) WithHeight(height int64) CLIContext {
+	ctx.Height = height
+	return ctx
+}
+
 // WithClient returns a copy of the context with an updated RPC client
 // instance.
 func (ctx CLIContext) WithClient(client rpcclient.Client) CLIContext {
@@ -226,9 +177,15 @@ func (ctx CLIContext) WithUseLedger(useLedger bool) CLIContext {
 	return ctx
 }
 
-// WithVerifier - return a copy of the context with an updated Verifier
+// WithVerifier returns a copy of the context with an updated Verifier.
 func (ctx CLIContext) WithVerifier(verifier tmlite.Verifier) CLIContext {
 	ctx.Verifier = verifier
+	return ctx
+}
+
+// WithChainID returns a copy of the context with an updated chain ID.
+func (ctx CLIContext) WithChainID(chainID string) CLIContext {
+	ctx.ChainID = chainID
 	return ctx
 }
 
@@ -267,12 +224,15 @@ func (ctx CLIContext) WithBroadcastMode(mode string) CLIContext {
 // PrintOutput prints output while respecting output and indent flags
 // NOTE: pass in marshalled structs that have been unmarshaled
 // because this function will panic on marshaling errors
-func (ctx CLIContext) PrintOutput(toPrint fmt.Stringer) (err error) {
-	var out []byte
+func (ctx CLIContext) PrintOutput(toPrint interface{}) error {
+	var (
+		out []byte
+		err error
+	)
 
 	switch ctx.OutputFormat {
 	case "text":
-		out = []byte(toPrint.String())
+		out, err = yaml.Marshal(&toPrint)
 
 	case "json":
 		if ctx.Indent {
@@ -283,17 +243,17 @@ func (ctx CLIContext) PrintOutput(toPrint fmt.Stringer) (err error) {
 	}
 
 	if err != nil {
-		return
+		return err
 	}
 
 	fmt.Println(string(out))
-	return
+	return nil
 }
 
 // GetFromFields returns a from account address and Keybase name given either
 // an address or key name. If genOnly is true, only a valid Bech32 cosmos
 // address is returned.
-func GetFromFields(from string, genOnly bool) (sdk.AccAddress, string, error) {
+func GetFromFields(input io.Reader, from string, genOnly bool) (sdk.AccAddress, string, error) {
 	if from == "" {
 		return nil, "", nil
 	}
@@ -307,7 +267,7 @@ func GetFromFields(from string, genOnly bool) (sdk.AccAddress, string, error) {
 		return addr, "", nil
 	}
 
-	keybase, err := keys.NewKeyBaseFromHomeFlag()
+	keybase, err := keys.NewKeyringFromHomeFlag(input)
 	if err != nil {
 		return nil, "", err
 	}

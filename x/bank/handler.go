@@ -1,63 +1,79 @@
 package bank
 
 import (
-	"fmt"
-
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/x/bank/tags"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
+	"github.com/cosmos/cosmos-sdk/x/bank/internal/keeper"
+	"github.com/cosmos/cosmos-sdk/x/bank/internal/types"
 )
 
 // NewHandler returns a handler for "bank" type messages.
-func NewHandler(k Keeper) sdk.Handler {
-	return func(ctx sdk.Context, msg sdk.Msg) sdk.Result {
+func NewHandler(k keeper.Keeper) sdk.Handler {
+	return func(ctx sdk.Context, msg sdk.Msg) (*sdk.Result, error) {
+		ctx = ctx.WithEventManager(sdk.NewEventManager())
+
 		switch msg := msg.(type) {
-		case MsgSend:
+		case types.MsgSend:
 			return handleMsgSend(ctx, k, msg)
 
-		case MsgMultiSend:
+		case types.MsgMultiSend:
 			return handleMsgMultiSend(ctx, k, msg)
 
 		default:
-			errMsg := fmt.Sprintf("unrecognized bank message type: %T", msg)
-			return sdk.ErrUnknownRequest(errMsg).Result()
+			return nil, sdkerrors.Wrapf(sdkerrors.ErrUnknownRequest, "unrecognized bank message type: %T", msg)
 		}
 	}
 }
 
 // Handle MsgSend.
-func handleMsgSend(ctx sdk.Context, k Keeper, msg MsgSend) sdk.Result {
+func handleMsgSend(ctx sdk.Context, k keeper.Keeper, msg types.MsgSend) (*sdk.Result, error) {
 	if !k.GetSendEnabled(ctx) {
-		return ErrSendDisabled(k.Codespace()).Result()
+		return nil, types.ErrSendDisabled
 	}
+
+	if k.BlacklistedAddr(msg.ToAddress) {
+		return nil, sdkerrors.Wrapf(sdkerrors.ErrUnauthorized, "%s is not allowed to receive transactions", msg.ToAddress)
+	}
+
 	err := k.SendCoins(ctx, msg.FromAddress, msg.ToAddress, msg.Amount)
 	if err != nil {
-		return err.Result()
+		return nil, err
 	}
 
-	resTags := sdk.NewTags(
-		tags.Category, tags.TxCategory,
-		tags.Sender, msg.FromAddress.String(),
-		tags.Recipient, msg.ToAddress.String(),
+	ctx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			sdk.EventTypeMessage,
+			sdk.NewAttribute(sdk.AttributeKeyModule, types.AttributeValueCategory),
+		),
 	)
 
-	return sdk.Result{
-		Tags: resTags,
-	}
+	return &sdk.Result{Events: ctx.EventManager().Events()}, nil
 }
 
 // Handle MsgMultiSend.
-func handleMsgMultiSend(ctx sdk.Context, k Keeper, msg MsgMultiSend) sdk.Result {
+func handleMsgMultiSend(ctx sdk.Context, k keeper.Keeper, msg types.MsgMultiSend) (*sdk.Result, error) {
 	// NOTE: totalIn == totalOut should already have been checked
 	if !k.GetSendEnabled(ctx) {
-		return ErrSendDisabled(k.Codespace()).Result()
-	}
-	resTags, err := k.InputOutputCoins(ctx, msg.Inputs, msg.Outputs)
-	if err != nil {
-		return err.Result()
+		return nil, types.ErrSendDisabled
 	}
 
-	resTags = resTags.AppendTag(tags.Category, tags.TxCategory)
-	return sdk.Result{
-		Tags: resTags,
+	for _, out := range msg.Outputs {
+		if k.BlacklistedAddr(out.Address) {
+			return nil, sdkerrors.Wrapf(sdkerrors.ErrUnauthorized, "%s is not allowed to receive transactions", out.Address)
+		}
 	}
+
+	err := k.InputOutputCoins(ctx, msg.Inputs, msg.Outputs)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			sdk.EventTypeMessage,
+			sdk.NewAttribute(sdk.AttributeKeyModule, types.AttributeValueCategory),
+		),
+	)
+
+	return &sdk.Result{Events: ctx.EventManager().Events()}, nil
 }

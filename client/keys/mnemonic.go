@@ -1,13 +1,14 @@
 package keys
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"fmt"
 
 	bip39 "github.com/bartekn/go-bip39"
 	"github.com/spf13/cobra"
 
-	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/client/input"
 )
 
 const (
@@ -16,7 +17,8 @@ const (
 	mnemonicEntropySize = 256
 )
 
-func mnemonicKeyCommand() *cobra.Command {
+// MnemonicKeyCommand computes the bip39 memonic for input entropy.
+func MnemonicKeyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mnemonic",
 		Short: "Compute the bip39 mnemonic for some input entropy",
@@ -36,15 +38,15 @@ func runMnemonicCmd(cmd *cobra.Command, args []string) error {
 
 	if userEntropy {
 		// prompt the user to enter some entropy
-		buf := client.BufferStdin()
-		inputEntropy, err := client.GetString("> WARNING: Generate at least 256-bits of entropy and enter the results here:", buf)
+		buf := bufio.NewReader(cmd.InOrStdin())
+		inputEntropy, err := input.GetString("> WARNING: Generate at least 256-bits of entropy and enter the results here:", buf)
 		if err != nil {
 			return err
 		}
 		if len(inputEntropy) < 43 {
 			return fmt.Errorf("256-bits is 43 characters in Base-64, and 100 in Base-6. You entered %v, and probably want more", len(inputEntropy))
 		}
-		conf, err := client.GetConfirmation(fmt.Sprintf("> Input length: %d", len(inputEntropy)), buf)
+		conf, err := input.GetConfirmation(fmt.Sprintf("> Input length: %d", len(inputEntropy)), buf)
 		if err != nil {
 			return err
 		}
@@ -64,12 +66,11 @@ func runMnemonicCmd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	mnemonic, err := bip39.NewMnemonic(entropySeed[:])
+	mnemonic, err := bip39.NewMnemonic(entropySeed)
 	if err != nil {
 		return err
 	}
-
-	fmt.Println(mnemonic)
+	cmd.Println(mnemonic)
 
 	return nil
 }
